@@ -4364,12 +4364,10 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         isSending = false
     end
 
-    -- NEW: Vulnerability Scanner Integration
     local vulnerabilityFindings = nil
     local scannerGui = nil
 
     local function runVulnerabilityScanner(parentFrame)
-        -- This function will create the scanner GUI inside parentFrame and return findings
         local findings = {}
         local totalFindings = 0
         local function consolePrint(msg)
@@ -4638,7 +4636,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             return table.concat(result, "\n")
         end
 
-        -- Build GUI inside parentFrame
         local PANEL_W = 360
         local PANEL_H = 496
 
@@ -5110,7 +5107,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
 
         Scan()
 
-        -- Console report generation
         print("\n")
         print("============================================================")
         print("  VULNERABILITY SCANNER - CONSOLE REPORT")
@@ -5544,7 +5540,7 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
 
         scannerGui = {left = left, right = right, scroll = scroll, layout = layout, cbox = cbox, ctext = ctext, loadFrame = loadFrame}
         vulnerabilityFindings = findings
-        return findings
+        return findings, folders
     end
 
     local function showDecodePro()
@@ -5563,22 +5559,131 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         dotAnim:Disconnect()
         typingFrame:Destroy()
 
-        local maxTextWidth = chatDisplay.AbsoluteSize.X * 0.7 - 40 - 60
-        local paddedBubbleWidth = math.min(maxTextWidth + 32, chatDisplay.AbsoluteSize.X * 0.7)
+        local maxTextWidth = chatDisplay.AbsoluteSize.X * 0.9 - 40 - 60
+        local paddedBubbleWidth = math.min(maxTextWidth + 32, 800)
         local _, messageContent = buildMessageBubble("ai", paddedBubbleWidth, false, true)
 
         local scannerContainer = Instance.new("Frame")
-        scannerContainer.Size = UDim2.new(1, 0, 0, 500)
+        scannerContainer.Size = UDim2.new(0, paddedBubbleWidth, 0, 0)
+        scannerContainer.AutomaticSize = Enum.AutomaticSize.Y
+        scannerContainer.AnchorPoint = Vector2.new(0.5, 0)
+        scannerContainer.Position = UDim2.new(0.5, 0, 0, 0)
         scannerContainer.BackgroundTransparency = 1
         scannerContainer.LayoutOrder = 1
         scannerContainer.Parent = messageContent
 
-        local findings = runVulnerabilityScanner(scannerContainer)
+        local findings, folders = runVulnerabilityScanner(scannerContainer)
 
         task.wait()
         updateCanvasAndScroll()
 
-        -- Generate AI summary based on findings
+        if folders and next(folders) then
+            local totalScripts = 0
+            for _, list in pairs(folders) do totalScripts = totalScripts + #list end
+            local progressMsg = "Decompilation started. Processing " .. totalScripts .. " scripts across " .. #folders .. " folders..."
+            table.insert(conversationHistory, {role = "assistant", content = progressMsg})
+            addAIMessageStreamed("ai", progressMsg)
+            task.wait()
+            updateCanvasAndScroll()
+
+            local function GetSourceSafe(scr)
+                local ok, src = pcall(function()
+                    if DecompileFunc then
+                        return DecompileFunc(scr)
+                    else
+                        return scr.Source
+                    end
+                end)
+                if ok and src and src ~= "" then
+                    return src
+                end
+                return nil
+            end
+
+            local function RemoveCommentsFromCode(code)
+                if not code then return "" end
+                local lines = {}
+                for line in code:gmatch("([^\n]*)\n?") do
+                    local pos = line:find("%-%-")
+                    if pos then
+                        line = line:sub(1, pos - 1)
+                    end
+                    if line:gsub("%s+", "") ~= "" then
+                        table.insert(lines, line)
+                    end
+                end
+                return table.concat(lines, "\n")
+            end
+
+            local function DecompileScript(scr)
+                local src = GetSourceSafe(scr)
+                if src then
+                    src = RemoveCommentsFromCode(src)
+                end
+                return src or "// Source not available or decompile failed"
+            end
+
+            local folderIndex = 1
+            local totalFolders = #folders
+            for folderName, scriptList in pairs(folders) do
+                local thinkingText = "Decompiling " .. folderName .. " (" .. #scriptList .. " scripts)..."
+                local thinkingFrame, thinkingAnim = spawnTypingBubble()
+                local dotCount = 0
+                local updateConn
+                updateConn = run_service.Heartbeat:Connect(function()
+                    dotCount = (dotCount + 1) % 4
+                    local dots = string.rep(".", dotCount)
+                    if thinkingFrame and thinkingFrame.Parent then
+                        local bubble = thinkingFrame:FindFirstChildOfClass("ImageLabel")
+                        if bubble then
+                            local text = bubble:FindFirstChildOfClass("TextLabel")
+                            if text then
+                                text.Text = "Decompiling " .. folderName .. " (" .. #scriptList .. ")" .. dots
+                            end
+                        end
+                    end
+                end)
+
+                local decompiledCount = 0
+                for _, scr in ipairs(scriptList) do
+                    local src = DecompileScript(scr)
+                    local report = "**" .. folderName .. "/" .. scr.Name .. "**\n```lua\n" .. src .. "\n```"
+                    table.insert(conversationHistory, {role = "assistant", content = report})
+                    addAIMessageStreamed("ai", report)
+                    task.wait(0.2)
+                    decompiledCount = decompiledCount + 1
+                    if decompiledCount % 5 == 0 then
+                        task.wait()
+                        updateCanvasAndScroll()
+                    end
+                end
+
+                if updateConn then updateConn:Disconnect() end
+                if thinkingFrame then thinkingFrame:Destroy() end
+                if thinkingAnim then thinkingAnim:Disconnect() end
+
+                local folderDoneMsg = "✅ Decompiled " .. folderName .. " (" .. #scriptList .. " scripts) – completed.\n\n"
+                table.insert(conversationHistory, {role = "assistant", content = folderDoneMsg})
+                addAIMessageStreamed("ai", folderDoneMsg)
+                task.wait(0.3)
+                updateCanvasAndScroll()
+
+                folderIndex = folderIndex + 1
+            end
+
+            local finalMsg = "✅ All " .. totalScripts .. " scripts from " .. totalFolders .. " folders have been decompiled and reported."
+            table.insert(conversationHistory, {role = "assistant", content = finalMsg})
+            addAIMessageStreamed("ai", finalMsg)
+            task.wait()
+            updateCanvasAndScroll()
+        else
+            local noScriptsMsg = "No folders or scripts found to decompile."
+            table.insert(conversationHistory, {role = "assistant", content = noScriptsMsg})
+            addAIMessageStreamed("ai", noScriptsMsg)
+            task.wait()
+            updateCanvasAndScroll()
+        end
+
         local summaryPrompt = "Based on the vulnerability scan findings, generate a detailed summary of the game. Include: game name (if known), purpose, mechanics, existing software vulnerabilities (list them), any win/loss systems, and other notable aspects. Use the findings to support your analysis."
         local actualModel = modelMap[currentAIModel] or "deepseek-chat"
         local summary, err = callDeepSeekFull(actualModel, summaryPrompt, false)
@@ -5683,7 +5788,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             return btn
         end
 
-        -- First button: Decode Pro
         createBtn("Decode Pro", function()
             if isSending then return end
             showDecodePro()
@@ -7456,6 +7560,14 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
     end
 
     local function buildUI()
+        local targetGui = game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("UraniumUltimate")
+        if targetGui and targetGui.Parent then
+            local pos = targetGui.AbsolutePosition
+            local size = targetGui.AbsoluteSize
+            container.Position = UDim2.new(0, pos.X + size.X + 10, 0, pos.Y)
+            container.Size = UDim2.new(0, 420, 0, size.Y)
+        end
+
         titleLabel = Instance.new("TextLabel")
         titleLabel.Size = UDim2.new(1, 0, 0, 40)
         titleLabel.BackgroundTransparency = 1
