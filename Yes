@@ -2108,9 +2108,16 @@ populateTools()]]
         end
 
         local function renderDecodeProPreview(parent)
-            -- Embed the script's original explorer left panel verbatim, keep size unchanged and centered.
+            -- Place the original explorer panel inside a full-width wrapper so it remains centered
             local PANEL_W = 360
             local PANEL_H = 496
+
+            local wrapper = Instance.new("Frame")
+            wrapper.Size = UDim2.new(1, 0, 0, PANEL_H)
+            wrapper.BackgroundTransparency = 1
+            wrapper.BorderSizePixel = 0
+            wrapper.LayoutOrder = 4
+            wrapper.Parent = parent
 
             local explorer = Instance.new("Frame")
             explorer.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
@@ -2118,8 +2125,7 @@ populateTools()]]
             explorer.Position = UDim2.new(0.5, 0, 0, 0)
             explorer.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
             explorer.BorderSizePixel = 0
-            explorer.LayoutOrder = 4
-            explorer.Parent = parent
+            explorer.Parent = wrapper
 
             local explorerCorner = Instance.new("UICorner")
             explorerCorner.CornerRadius = UDim.new(0, 10)
@@ -2163,6 +2169,32 @@ populateTools()]]
             local function UpdateCanvas()
                 scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
             end
+
+            -- Responsive: if the message bubble is narrower than the panel width,
+            -- shrink the embedded explorer to fit while preserving height.
+            local function adjustExplorerSize()
+                local ok, w = pcall(function() return parent.AbsoluteSize.X end)
+                if not ok or not w then return end
+                local available = math.max(0, w - 32)
+                local newW = PANEL_W
+                if available < PANEL_W then
+                    newW = math.max(120, available)
+                end
+                explorer.Size = UDim2.new(0, newW, 0, PANEL_H)
+                explorer.AnchorPoint = Vector2.new(0.5, 0)
+                explorer.Position = UDim2.new(0.5, 0, 0, 0)
+            end
+
+            -- initial adjust (deferred so AbsoluteSize is valid)
+            task.defer(function()
+                task.wait()
+                pcall(adjustExplorerSize)
+                pcall(UpdateCanvas)
+            end)
+
+            parent:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                pcall(adjustExplorerSize)
+            end)
 
             -- Scan and populate using the same logic as the original explorer (keeps appearance and behavior)
             local SCAN_PATHS = {
