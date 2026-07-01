@@ -811,25 +811,28 @@ populateTools()]]
         while i <= n do
             local c = code:sub(i, i)
             local two = code:sub(i, i + 1)
-            if two == "
-                local rest
-                if code:sub(i, i + 3) == "", i + 4, true)
-                    rest = e and code:sub(i, e + 1) or code:sub(i)
+            if two == "--" then
+                -- line or block comment
+                if code:sub(i, i + 3) == "--[[" then
+                    local e = code:find("]]", i + 4, true)
+                    local rest = e and code:sub(i, e + 1) or code:sub(i)
+                    push(COM, rest)
+                    i = i + #rest
                 else
                     local e = code:find("\n", i, true)
-                    rest = e and code:sub(i, e - 1) or code:sub(i)
+                    local rest = e and code:sub(i, e - 1) or code:sub(i)
+                    push(COM, rest)
+                    i = i + #rest
                 end
-                push(COM, rest)
-                i = i + #rest
-            elseif c == "\"" or c == "'" then
+            elseif c == '"' or c == "'" then
                 local j = i + 1
                 while j <= n do
                     local cc = code:sub(j, j)
                     if cc == "\\" then j = j + 2
-                    elseif cc == c then j = j + 1 break
+                    elseif cc == c then j = j + 1; break
                     else j = j + 1 end
                 end
-                local str = code:sub(i, j - 1)
+                local str = code:sub(i, math.max(j - 1, i))
                 push(STR, str)
                 i = j
             elseif code:sub(i, i + 1) == "[[" then
@@ -838,13 +841,14 @@ populateTools()]]
                 push(STR, str)
                 i = i + #str
             elseif c:match("%d") then
-                local num = code:match("^[%dxXa-fA-F%.]+", i) or c
+                local num = code:match("^[%d%x%.eE%+%-]+", i) or c
                 push(NUM, num)
                 i = i + #num
             elseif c:match("[%a_]") then
                 local word = code:match("^[%w_]+", i)
                 local afterIdx = i + #word
-                local afterChar = code:sub(afterIdx, afterIdx):match("%S") and code:sub(afterIdx):match("^%s*(.)") or ""
+                local after = code:sub(afterIdx)
+                local afterChar = after:match("^%s*(.)") or ""
                 if LUA_KEYWORDS[word] then
                     push(KW, word)
                 elseif LUA_GLOBALS[word] then
