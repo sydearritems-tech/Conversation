@@ -80,15 +80,6 @@ local function createAIModule(config)
 
     local showDarkButtons, showNormalButtons, switchToDarkAI
 
-    local DecompileFunc
-    if syn and syn.decompile then
-        DecompileFunc = syn.decompile
-    elseif krnl and krnl.decompile then
-        DecompileFunc = krnl.decompile
-    elseif type(decompile) == "function" then
-        DecompileFunc = decompile
-    end
-
     local SCAN_REMOTES_CODE = [[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = game:GetService("Players").LocalPlayer
 local ScreenGui = Instance.new("ScreenGui")
@@ -4373,663 +4364,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         isSending = false
     end
 
-    local function GetSource(scr)
-        local ok, src = pcall(function() return scr.Source end)
-        if ok and src and src ~= "" then
-            return src
-        end
-        if DecompileFunc then
-            ok, src = pcall(DecompileFunc, scr)
-            if ok and src and src ~= "" then
-                return src
-            end
-        end
-        return nil
-    end
-
-    local function RemoveComments(code)
-        if not code or code == "" then return code end
-        local lines = {}
-        for line in code:gmatch("[^\r\n]*") do
-            local pos = line:find("%-%-")
-            if pos then
-                line = line:sub(1, pos - 1)
-            end
-            table.insert(lines, line)
-        end
-        return table.concat(lines, "\n")
-    end
-
-    local function HighlightLua(code)
-        if not code or code == "" then return "" end
-        local keywords = {"function","end","if","then","else","elseif","for","while","repeat","until","do","return","local","break","continue","goto","in","and","or","not","nil","true","false","require","pcall","xpcall","spawn","delay","wait","tick","time","typeof","type","rawequal","rawget","rawset","setmetatable","getmetatable","next","pairs","ipairs","select","unpack","pack","newproxy","self"}
-        local builtins = {"print","warn","error","assert","Instance","Color3","Vector2","Vector3","CFrame","UDim2","UDim","NumberSequence","NumberRange","ColorSequence","Ray","Region3","Rect","BrickColor","Enum","TweenInfo","Axes","Faces","RaycastParams","DateTime","Random","string","table","math","coroutine","os","debug","utf8","bit32","workspace","game","script","shared","plugin","settings","stats","UserInputService","TweenService","RunService","Players","Lighting","Workspace","ReplicatedStorage","ReplicatedFirst"}
-
-        local function EscapeHTML(s)
-            return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
-        end
-
-        local result = {}
-        local lines = {}
-        for line in code:gmatch("([^\n]*)\n?") do
-            lines[#lines+1] = line
-        end
-        if #lines == 0 then
-            lines = {code}
-        end
-        for _, line in ipairs(lines) do
-            local escaped = EscapeHTML(line)
-            local hl = ""
-            local pos = 1
-            while pos <= #escaped do
-                local remaining = escaped:sub(pos)
-                local longStrMatch = remaining:match("^(\[\[.-\]\])")
-                local dqMatch = remaining:match('^"(.-)"')
-                local sqMatch = remaining:match("^'(.-)'")
-                local hexMatch = remaining:match("^(0[xX][%da-fA-F]+)")
-                local numMatch = remaining:match("^(%d+%.?%d*[eE]?[%+%-]?%d*)")
-                if not numMatch then
-                    numMatch = remaining:match("^(%.%d+)")
-                end
-                local wordMatch = remaining:match("^([%a_][%w_]*)")
-                local best = nil
-                local bestLen = 0
-                local bestType = nil
-                if longStrMatch and #longStrMatch > bestLen then
-                    best = longStrMatch
-                    bestLen = #longStrMatch
-                    bestType = "longstring"
-                end
-                if dqMatch and (#dqMatch + 2) > bestLen then
-                    best = dqMatch
-                    bestLen = #dqMatch + 2
-                    bestType = "string"
-                end
-                if sqMatch and (#sqMatch + 2) > bestLen then
-                    best = sqMatch
-                    bestLen = #sqMatch + 2
-                    bestType = "string"
-                end
-                if hexMatch and #hexMatch > bestLen then
-                    best = hexMatch
-                    bestLen = #hexMatch
-                    bestType = "number"
-                end
-                if numMatch and #numMatch > bestLen then
-                    best = numMatch
-                    bestLen = #numMatch
-                    bestType = "number"
-                end
-                if wordMatch and #wordMatch > bestLen then
-                    best = wordMatch
-                    bestLen = #wordMatch
-                    bestType = "word"
-                end
-                if best then
-                    if bestType == "longstring" then
-                        hl = hl .. "<font color='#98c379'>" .. best .. "</font>"
-                    elseif bestType == "string" then
-                        local q = best:sub(1,1)
-                        local content = best:sub(2, #best-1)
-                        local esc = EscapeHTML(content)
-                        local processed = ""
-                        local ep = 1
-                        while ep <= #esc do
-                            local er = esc:sub(ep)
-                            local es = er:match("^(\\[%a%d\\'\"])")
-                            if es then
-                                processed = processed .. "<font color='#e5c07b'>" .. es .. "</font>"
-                                ep = ep + #es
-                            else
-                                processed = processed .. esc:sub(ep, ep)
-                                ep = ep + 1
-                            end
-                        end
-                        hl = hl .. "<font color='#98c379'>" .. q .. processed .. q .. "</font>"
-                    elseif bestType == "number" then
-                        hl = hl .. "<font color='#d19a66'>" .. best .. "</font>"
-                    elseif bestType == "word" then
-                        local lower = best:lower()
-                        local isKw = false
-                        local isB = false
-                        for _, k in ipairs(keywords) do
-                            if k == lower then
-                                isKw = true
-                                break
-                            end
-                        end
-                        if not isKw then
-                            for _, b in ipairs(builtins) do
-                                if b == lower then
-                                    isB = true
-                                    break
-                                end
-                            end
-                        end
-                        if isKw then
-                            hl = hl .. "<font color='#c678dd'>" .. best .. "</font>"
-                        elseif isB then
-                            hl = hl .. "<font color='#61afef'>" .. best .. "</font>"
-                        else
-                            hl = hl .. best
-                        end
-                    end
-                    pos = pos + bestLen
-                else
-                    hl = hl .. escaped:sub(pos, pos)
-                    pos = pos + 1
-                end
-            end
-            result[#result+1] = hl
-        end
-        return table.concat(result, "\n")
-    end
-
-    local function showDecodePro()
-        if isSending then return end
-        isSending = true
-
-        addAIMessage("user", "Hi Sydec, please list potential software vulnerabilities in the game in folders. Each folder should contain scripts, and when I click on any of these scripts, it should decompile and I should be able to see its contents. Also, print the potential vulnerabilities as console messages. Finally, when I ask you questions, please provide the necessary answers using the script you've written.")
-        table.insert(conversationHistory, {role = "user", content = "Hi Sydec, please list potential software vulnerabilities in the game in folders. Each folder should contain scripts, and when I click on any of these scripts, it should decompile and I should be able to see its contents. Also, print the potential vulnerabilities as console messages. Finally, when I ask you questions, please provide the necessary answers using the script you've written."})
-
-        local typingFrame, dotAnim = spawnTypingBubble()
-
-        task.spawn(function()
-            task.wait(5)
-
-            dotAnim:Disconnect()
-            typingFrame:Destroy()
-            isSending = false
-
-            createVulnerabilityUI()
-        end)
-    end
-
-    local function createVulnerabilityUI()
-        if not chatDisplay or not chatLayout then return end
-
-        local maxTextWidth = chatDisplay.AbsoluteSize.X * 0.7 - 40 - 60
-        local paddedBubbleWidth = math.min(maxTextWidth + 32, chatDisplay.AbsoluteSize.X * 0.7)
-        local messageFrame, messageContent = buildMessageBubble("ai", paddedBubbleWidth, false, true)
-
-        local left = Instance.new("Frame")
-        left.Size = UDim2.new(1, 0, 0, 420)
-        left.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
-        left.BorderSizePixel = 0
-        left.Parent = messageContent
-
-        Instance.new("UICorner", left).CornerRadius = UDim.new(0, 10)
-
-        local lStroke = Instance.new("UIStroke", left)
-        lStroke.Color = Color3.fromRGB(60, 60, 60)
-        lStroke.Thickness = 1
-
-        local ltitle = Instance.new("TextLabel", left)
-        ltitle.Size = UDim2.new(1, 0, 0, 40)
-        ltitle.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-        ltitle.BorderSizePixel = 0
-        ltitle.Text = "VULNERABILITY EXPLORER"
-        ltitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-        ltitle.TextSize = 15
-        ltitle.Font = Enum.Font.GothamBold
-        Instance.new("UICorner", ltitle).CornerRadius = UDim.new(0, 10)
-
-        local scroll = Instance.new("ScrollingFrame", left)
-        scroll.Size = UDim2.new(1, -12, 1, -52)
-        scroll.Position = UDim2.new(0, 6, 0, 46)
-        scroll.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
-        scroll.BackgroundTransparency = 0.5
-        scroll.BorderSizePixel = 0
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-        scroll.ScrollBarThickness = 6
-        scroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-        Instance.new("UICorner", scroll).CornerRadius = UDim.new(0, 8)
-
-        local layout = Instance.new("UIListLayout", scroll)
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Padding = UDim.new(0, 3)
-
-        local function UpdateCanvas()
-            scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-        end
-        layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
-
-        local rightGui = Instance.new("ScreenGui")
-        rightGui.Name = "SourceViewer_Pro"
-        rightGui.ResetOnSpawn = false
-        rightGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-
-        local right = Instance.new("Frame", rightGui)
-        right.Size = UDim2.new(0, 400, 0, 500)
-        right.Position = UDim2.new(1, 20, 0.5, -250)
-        right.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-        right.BorderSizePixel = 0
-        right.Visible = false
-        right.Active = true
-        Instance.new("UICorner", right).CornerRadius = UDim.new(0, 10)
-
-        local rStroke = Instance.new("UIStroke", right)
-        rStroke.Color = Color3.fromRGB(60, 60, 60)
-        rStroke.Thickness = 1
-
-        local rtitle = Instance.new("TextLabel", right)
-        rtitle.Size = UDim2.new(1, 0, 0, 40)
-        rtitle.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-        rtitle.BorderSizePixel = 0
-        rtitle.Text = "SOURCE VIEWER"
-        rtitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-        rtitle.TextSize = 15
-        rtitle.Font = Enum.Font.GothamBold
-        rtitle.ZIndex = 2
-        Instance.new("UICorner", rtitle).CornerRadius = UDim.new(0, 10)
-
-        local rClose = Instance.new("TextButton", right)
-        rClose.Size = UDim2.new(0, 32, 0, 28)
-        rClose.Position = UDim2.new(1, -34, 0, 6)
-        rClose.BackgroundColor3 = Color3.fromRGB(40, 25, 25)
-        rClose.BorderSizePixel = 0
-        rClose.Text = "X"
-        rClose.TextColor3 = Color3.fromRGB(255, 255, 255)
-        rClose.TextSize = 14
-        rClose.Font = Enum.Font.GothamBold
-        rClose.ZIndex = 10
-        rClose.Active = true
-        rClose.AutoButtonColor = true
-        Instance.new("UICorner", rClose).CornerRadius = UDim.new(0, 6)
-
-        rClose.MouseEnter:Connect(function()
-            rClose.BackgroundColor3 = Color3.fromRGB(70, 35, 35)
-        end)
-        rClose.MouseLeave:Connect(function()
-            rClose.BackgroundColor3 = Color3.fromRGB(40, 25, 25)
-        end)
-        rClose.MouseButton1Click:Connect(function()
-            right.Visible = false
-            rightGui:Destroy()
-        end)
-
-        local cbox = Instance.new("ScrollingFrame", right)
-        cbox.Size = UDim2.new(1, -12, 1, -52)
-        cbox.Position = UDim2.new(0, 6, 0, 46)
-        cbox.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
-        cbox.BackgroundTransparency = 0.5
-        cbox.BorderSizePixel = 0
-        cbox.CanvasSize = UDim2.new(0, 0, 0, 0)
-        cbox.ScrollBarThickness = 6
-        cbox.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-        cbox.Active = true
-        Instance.new("UICorner", cbox).CornerRadius = UDim.new(0, 8)
-
-        local ctext = Instance.new("TextLabel", cbox)
-        ctext.Size = UDim2.new(1, -12, 0, 0)
-        ctext.Position = UDim2.new(0, 6, 0, 6)
-        ctext.BackgroundTransparency = 1
-        ctext.Text = ""
-        ctext.TextColor3 = Color3.fromRGB(230, 230, 230)
-        ctext.TextSize = 13
-        ctext.Font = Enum.Font.Code
-        ctext.TextXAlignment = Enum.TextXAlignment.Left
-        ctext.TextYAlignment = Enum.TextYAlignment.Top
-        ctext.TextWrapped = true
-        ctext.RichText = true
-        ctext.Visible = false
-        ctext.AutomaticSize = Enum.AutomaticSize.Y
-        ctext:GetPropertyChangedSignal("TextBounds"):Connect(function()
-            task.wait()
-            cbox.CanvasSize = UDim2.new(0, 0, 0, ctext.AbsoluteSize.Y + 16)
-        end)
-
-        local loadFrame = Instance.new("Frame", cbox)
-        loadFrame.Size = UDim2.new(1, 0, 1, 0)
-        loadFrame.BackgroundTransparency = 1
-        loadFrame.Visible = true
-
-        local loadText = Instance.new("TextLabel", loadFrame)
-        loadText.Size = UDim2.new(0, 260, 0, 30)
-        loadText.Position = UDim2.new(0.5, -130, 0.5, -30)
-        loadText.BackgroundTransparency = 1
-        loadText.Text = "Decompiling..."
-        loadText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        loadText.TextSize = 16
-        loadText.Font = Enum.Font.GothamBold
-
-        local loadGrad = Instance.new("UIGradient", loadText)
-        loadGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(140, 140, 140)),
-            ColorSequenceKeypoint.new(0.6, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
-        })
-        loadGrad.Offset = Vector2.new(1, 0)
-
-        local loadUnderline = Instance.new("Frame", loadFrame)
-        loadUnderline.Size = UDim2.new(0, 240, 0, 2)
-        loadUnderline.Position = UDim2.new(0.5, -120, 0.5, 0)
-        loadUnderline.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        loadUnderline.BorderSizePixel = 0
-
-        local loadGradLine = Instance.new("UIGradient", loadUnderline)
-        loadGradLine.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 100, 100)),
-            ColorSequenceKeypoint.new(0.4, Color3.fromRGB(100, 100, 100)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(0.6, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 100))
-        })
-        loadGradLine.Offset = Vector2.new(1, 0)
-
-        local function positionRightPanel()
-            if not container or not container.Parent then return end
-            local absPos = container.AbsolutePosition
-            local absSize = container.AbsoluteSize
-            right.Position = UDim2.new(0, absPos.X + absSize.X + 20, 0, absPos.Y + (absSize.Y - right.Size.Y.Offset) / 2)
-            right.Visible = true
-        end
-
-        local function ShowSourceViewer(scr)
-            loadFrame.Visible = true
-            ctext.Visible = false
-            loadText.Text = "Decompiling... " .. scr.Name
-            rtitle.Text = scr.Name
-
-            local tweenInfo = TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, false, 0)
-            local textTween = TweenService:Create(loadGrad, tweenInfo, {Offset = Vector2.new(-1, 0)})
-            local lineTween = TweenService:Create(loadGradLine, tweenInfo, {Offset = Vector2.new(-1, 0)})
-            textTween:Play()
-            lineTween:Play()
-
-            task.spawn(function()
-                local src = GetSource(scr)
-                if src then
-                    src = RemoveComments(src)
-                end
-                local highlighted = HighlightLua(src or "")
-                task.wait(0.2)
-
-                textTween:Cancel()
-                lineTween:Cancel()
-
-                loadFrame.Visible = false
-                ctext.Visible = true
-                if src then
-                    ctext.Text = "<font face='Code' size='13'>" .. highlighted .. "</font>"
-                else
-                    ctext.Text = "<font color='#e06c75'>Source unavailable</font>"
-                end
-            end)
-
-            positionRightPanel()
-        end
-
-        local function RenderFolder(folderName, scripts, orderIndex)
-            local expanded = false
-            local container = nil
-            local fBtn = Instance.new("TextButton")
-            fBtn.Size = UDim2.new(1, -12, 0, 30)
-            fBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-            fBtn.BorderSizePixel = 0
-            fBtn.Text = "[+] " .. folderName .. " (" .. #scripts .. ")"
-            fBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-            fBtn.TextSize = 14
-            fBtn.Font = Enum.Font.GothamBold
-            fBtn.TextXAlignment = Enum.TextXAlignment.Left
-            fBtn.TextTruncate = Enum.TextTruncate.AtEnd
-            fBtn.LayoutOrder = orderIndex * 100
-            fBtn.Parent = scroll
-
-            Instance.new("UICorner", fBtn).CornerRadius = UDim.new(0, 6)
-            local fStroke = Instance.new("UIStroke", fBtn)
-            fStroke.Color = Color3.fromRGB(70, 70, 70)
-            fStroke.Thickness = 1
-
-            fBtn.MouseEnter:Connect(function()
-                if not expanded then fBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40) end
-            end)
-            fBtn.MouseLeave:Connect(function()
-                if not expanded then fBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25) end
-            end)
-
-            fBtn.MouseButton1Click:Connect(function()
-                expanded = not expanded
-                if expanded then
-                    fBtn.Text = "[-] " .. folderName .. " (" .. #scripts .. ")"
-                    fBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-                    container = Instance.new("Frame")
-                    container.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-                    container.BorderSizePixel = 0
-                    container.LayoutOrder = fBtn.LayoutOrder + 1
-                    container.Parent = scroll
-
-                    local cLayout = Instance.new("UIListLayout", container)
-                    cLayout.SortOrder = Enum.SortOrder.LayoutOrder
-                    cLayout.Padding = UDim.new(0, 2)
-
-                    local cPad = Instance.new("UIPadding", container)
-                    cPad.PaddingLeft = UDim.new(0, 18)
-                    cPad.PaddingTop = UDim.new(0, 4)
-                    cPad.PaddingBottom = UDim.new(0, 4)
-
-                    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
-                    local cStroke = Instance.new("UIStroke", container)
-                    cStroke.Color = Color3.fromRGB(50, 50, 50)
-                    cStroke.Thickness = 1
-
-                    for i, scr in ipairs(scripts) do
-                        local sBtn = Instance.new("TextButton")
-                        sBtn.Size = UDim2.new(1, -20, 0, 26)
-                        sBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                        sBtn.BorderSizePixel = 0
-                        sBtn.Text = scr.Name
-                        sBtn.TextColor3 = Color3.fromRGB(100, 180, 255)
-                        sBtn.TextSize = 13
-                        sBtn.Font = Enum.Font.Gotham
-                        sBtn.TextXAlignment = Enum.TextXAlignment.Left
-                        sBtn.TextTruncate = Enum.TextTruncate.AtEnd
-                        sBtn.LayoutOrder = i
-                        sBtn.Parent = container
-
-                        Instance.new("UICorner", sBtn).CornerRadius = UDim.new(0, 4)
-                        local sStroke = Instance.new("UIStroke", sBtn)
-                        sStroke.Color = Color3.fromRGB(60, 60, 60)
-                        sStroke.Thickness = 1
-
-                        sBtn.MouseEnter:Connect(function()
-                            sBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-                        end)
-                        sBtn.MouseLeave:Connect(function()
-                            sBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                        end)
-
-                        sBtn.MouseButton1Click:Connect(function()
-                            ShowSourceViewer(scr)
-                        end)
-                    end
-
-                    task.wait()
-                    container.Size = UDim2.new(1, -12, 0, cLayout.AbsoluteContentSize.Y + 8)
-                    UpdateCanvas()
-                else
-                    fBtn.Text = "[+] " .. folderName .. " (" .. #scripts .. ")"
-                    fBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-                    if container then
-                        container:Destroy()
-                        container = nil
-                    end
-                    UpdateCanvas()
-                end
-            end)
-        end
-
-        local function Scan()
-            for _, v in ipairs(scroll:GetChildren()) do
-                if v:IsA("TextButton") or v:IsA("Frame") then
-                    v:Destroy()
-                end
-            end
-
-            ltitle.Text = "SCANNING..."
-            local scripts = {}
-            local SCAN_PATHS = {
-                game:GetService("ReplicatedStorage"),
-                game:GetService("ReplicatedFirst"),
-                game:GetService("StarterGui"),
-                game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"),
-                game:GetService("StarterPlayer"):FindFirstChild("StarterCharacterScripts"),
-                game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui"),
-                game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts"),
-                game:GetService("Players").LocalPlayer:FindFirstChild("Backpack"),
-                game:GetService("Players").LocalPlayer.Character or game:GetService("Players").LocalPlayer.CharacterAdded:Wait()
-            }
-
-            local EXCLUDE_PATTERNS = {"Roblox","CoreScript","BuiltIn","Debug","Rbx","Signal","Animation","Tween","Particle","Sound","Music","Chat","Notification","Popup","Menu","Button","Label","Frame","ScrollingFrame","TextLabel","TextButton","ImageLabel","ImageButton","ScreenGui","PlayerGui","StarterGui","Camera","Viewport","Bloom","Blur","SunRays","ColorCorrection","Sky","Clouds","Fog","Grass","Tree","Flower","Rock","Sand","Water","Fire","Smoke","Sparkle","Trail","Beam","Explosion","Hole","Terrain","Material","Lighting","Atmosphere","DepthOfField","PostEffect","MotionBlur","GaussianBlur"}
-
-            local VULN_KEYWORDS = {"Remote","Network","Handler","Manager","Controller","Service","Client","Server","Data","Save","Load","Database","Shop","Inventory","Currency","Coin","Gem","Gold","Trade","Transfer","Gift","Admin","Moderator","Mod","Ban","Kick","Punish","AntiCheat","Anti","Exploit","Security","Auth","Token","Secret","Key","Password","Salt","Hash","Encrypt","Decrypt","Command","Cmd","Action","Filter","Whitelist","Blacklist","Permission","Role","Rank","Teleport","Spawn","Respawn","Config","Setting","Hook","Callback","Detect","Detection","Log","Report","Lock","Unlock","Door","Gate","Chest","Loot","Drop","Rare","Legendary","VIP","Donor","Premium","Pass","Gamepass","Badge","Achievement","Reward","Resolver","Validator","Checker","Guard","Protect","Shield","Armor","Resistance","Immunity","Vulnerable","Weakness","Critical","Heal","Damage","Hitbox","Collision","Raycast","Weapon","Gun","Bullet","Projectile","Skill","Spell","Magic","Ability","Quest","Mission","Event","Trigger","ReplicatedStorage","ReplicatedFirst","Module","Util","Helper","Core","Main","Game","Logic","System","StarterPlayerScripts","StarterCharacterScripts","PlayerScripts","Backpack","Character"}
-
-            local function GetPath(inst)
-                local path = inst.Name
-                local parent = inst.Parent
-                local depth = 0
-                while parent and parent ~= game and depth < 15 do
-                    path = parent.Name .. "." .. path
-                    parent = parent.Parent
-                    depth = depth + 1
-                end
-                return "game." .. path
-            end
-
-            local function ShouldExclude(script)
-                local path = GetPath(script):lower()
-                for _, pat in ipairs(EXCLUDE_PATTERNS) do
-                    if path:find(pat:lower()) then
-                        return true
-                    end
-                end
-                return false
-            end
-
-            local function IsRelevant(script)
-                local path = GetPath(script):lower()
-                if script:IsA("ModuleScript") then
-                    return true
-                end
-                for _, kw in ipairs(VULN_KEYWORDS) do
-                    if path:find(kw:lower()) then
-                        return true
-                    end
-                end
-                return false
-            end
-
-            local function Score(script)
-                local path = GetPath(script):lower()
-                local score = 0
-                if path:find("remote") then score = score + 50 end
-                if path:find("network") then score = score + 45 end
-                if path:find("admin") or path:find("moderator") or path:find("ban") or path:find("kick") or path:find("punish") then score = score + 60 end
-                if path:find("anticheat") or path:find("antiexploit") or path:find("antihack") or path:find("security") or path:find("auth") or path:find("authentication") then score = score + 65 end
-                if path:find("token") or path:find("secret") or path:find("key") or path:find("password") or path:find("salt") or path:find("hash") or path:find("encrypt") then score = score + 70 end
-                if path:find("data") or path:find("save") or path:find("load") or path:find("database") then score = score + 40 end
-                if path:find("shop") or path:find("inventory") or path:find("currency") or path:find("coin") or path:find("gem") or path:find("gold") then score = score + 50 end
-                if path:find("trade") or path:find("transfer") or path:find("gift") then score = score + 50 end
-                if path:find("command") or path:find("cmd") then score = score + 45 end
-                if path:find("filter") or path:find("whitelist") or path:find("blacklist") then score = score + 55 end
-                if path:find("permission") or path:find("role") or path:find("rank") then score = score + 40 end
-                if path:find("teleport") or path:find("spawn") or path:find("respawn") then score = score + 35 end
-                if path:find("handler") then score = score + 35 end
-                if path:find("manager") or path:find("controller") then score = score + 30 end
-                if path:find("replicatedstorage") or path:find("replicatedfirst") then score = score + 40 end
-                if path:find("detect") or path:find("detection") or path:find("log") or path:find("report") then score = score + 40 end
-                if path:find("hook") or path:find("callback") or path:find("listener") then score = score + 35 end
-                if path:find("resolver") or path:find("validator") or path:find("checker") or path:find("guard") then score = score + 45 end
-                if path:find("weapon") or path:find("gun") or path:find("bullet") or path:find("projectile") or path:find("hitbox") or path:find("damage") then score = score + 30 end
-                if path:find("skill") or path:find("spell") or path:find("ability") or path:find("magic") then score = score + 25 end
-                if path:find("quest") or path:find("mission") or path:find("event") or path:find("trigger") then score = score + 25 end
-                if path:find("loot") or path:find("drop") or path:find("chest") or path:find("reward") then score = score + 30 end
-                if path:find("config") or path:find("setting") then score = score + 25 end
-                if path:find("service") or path:find("system") then score = score + 15 end
-                if path:find("game") or path:find("logic") then score = score + 15 end
-                if script:IsA("ModuleScript") then score = score + 10 end
-                return score
-            end
-
-            local function GetFolderName(script)
-                local p = script.Parent
-                return p and p.Name or "Unknown"
-            end
-
-            for _, root in ipairs(SCAN_PATHS) do
-                if root then
-                    local desc = root:GetDescendants()
-                    for i, obj in ipairs(desc) do
-                        if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                            if not ShouldExclude(obj) and IsRelevant(obj) then
-                                local s = Score(obj)
-                                if s >= 25 then
-                                    scripts[#scripts+1] = obj
-                                end
-                            end
-                        end
-                        if i % 50 == 0 then
-                            ltitle.Text = "SCANNING... (" .. #scripts .. ")"
-                            task.wait()
-                        end
-                    end
-                end
-            end
-
-            table.sort(scripts, function(a, b)
-                return Score(a) > Score(b)
-            end)
-
-            local MAX_SCRIPTS = 120
-            local trimmed = {}
-            for i = 1, math.min(#scripts, MAX_SCRIPTS) do
-                trimmed[i] = scripts[i]
-            end
-
-            local folders = {}
-            for _, scr in ipairs(trimmed) do
-                local fn = GetFolderName(scr)
-                if not folders[fn] then
-                    folders[fn] = {}
-                end
-                folders[fn][#folders[fn]+1] = scr
-            end
-
-            local sortedNames = {}
-            for n in pairs(folders) do
-                sortedNames[#sortedNames+1] = n
-            end
-            table.sort(sortedNames)
-
-            for i, name in ipairs(sortedNames) do
-                RenderFolder(name, folders[name], i)
-                if i % 25 == 0 then
-                    task.wait()
-                end
-            end
-
-            task.wait()
-            UpdateCanvas()
-            ltitle.Text = "EXPLORER (" .. #trimmed .. ")"
-        end
-
-        local function consoleReport()
-            print("\n============================================================")
-            print("  VULNERABILITY SCANNER - CONSOLE REPORT")
-            print("============================================================")
-            print("[SCANNER] Vulnerability scan completed.")
-            print("============================================================")
-        end
-
-        Scan()
-        consoleReport()
-
-        task.wait()
-        updateCanvasAndScroll(true)
-    end
-
     function showDarkButtons()
         if minimizedAdviceButton then
             minimizedAdviceButton.Visible = false
@@ -5119,11 +4453,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             end
             return btn
         end
-
-        createBtn("Decode Pro", function()
-            if isSending then return end
-            showDecodePro()
-        end)
 
         createBtn("Scan Remotes", function()
             if isSending then return end
@@ -5329,11 +4658,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             return btn
         end
 
-        createBtn("Decode Pro", function()
-            if isSending then return end
-            showDecodePro()
-        end)
-
         createBtn("Say Hello", function()
             conversationStarted = true
             animateHideWelcome()
@@ -5377,6 +4701,263 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
                 typingFrame:Destroy()
                 isSending = false
                 switchToDarkAI()
+            end)
+        end)
+
+        createBtn("Decode Pro", function()
+            conversationStarted = true
+            animateHideWelcome()
+            animateHideSuggestionButtons()
+            lastMessageTime = os.time()
+            messageCountToday = messageCountToday + 1
+            isSending = true
+            local userMsg = "Hi Sydec, please list potential software vulnerabilities in the game in folders. Each folder should contain scripts, and when I click on any of these scripts, it should decompile and I should be able to see its contents. Also, print the potential vulnerabilities as console messages. Finally, when I ask you questions, please provide the necessary answers using the script you've written."
+            addAIMessage("user", userMsg)
+            local typingFrame, dotAnim = spawnTypingBubble()
+            task.spawn(function()
+                task.wait(1)
+                pcall(function() dotAnim:Disconnect() end)
+                if typingFrame and typingFrame.Parent then typingFrame:Destroy() end
+            end)
+
+            local aiBubble = Instance.new("Frame")
+            aiBubble.Name = "AIBubble"
+            aiBubble.Size = UDim2.new(0, 560, 0, 220)
+            aiBubble.Position = UDim2.new(0.5, -280, 0.06, 0)
+            aiBubble.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+            aiBubble.BorderSizePixel = 0
+            aiBubble.ZIndex = 50
+            aiBubble.Parent = gui
+            local aiCorner = Instance.new("UICorner", aiBubble)
+            aiCorner.CornerRadius = UDim.new(0, 10)
+
+            local aiLabel = Instance.new("TextLabel", aiBubble)
+            aiLabel.Size = UDim2.new(1, -24, 0, 120)
+            aiLabel.Position = UDim2.new(0, 12, 0, 12)
+            aiLabel.BackgroundTransparency = 1
+            aiLabel.Text = userMsg
+            aiLabel.TextWrapped = true
+            aiLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
+            aiLabel.Font = Enum.Font.Gotham
+            aiLabel.TextSize = 14
+
+            local closeBtn = Instance.new("TextButton", aiBubble)
+            closeBtn.Size = UDim2.new(0, 28, 0, 28)
+            closeBtn.Position = UDim2.new(1, -34, 0, 6)
+            closeBtn.BackgroundColor3 = Color3.fromRGB(40, 25, 25)
+            closeBtn.BorderSizePixel = 0
+            closeBtn.Text = "X"
+            closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            closeBtn.Font = Enum.Font.GothamBold
+            local closeCorner = Instance.new("UICorner", closeBtn)
+            closeCorner.CornerRadius = UDim.new(0, 6)
+
+            local oldParent, oldPos, oldSize = left.Parent, left.Position, left.Size
+
+            task.spawn(function()
+                task.wait(5)
+                if not aiBubble or not aiBubble.Parent then return end
+                aiLabel.Text = ""
+
+                -- build a safe visual explorer inside the AI bubble and bind buttons to original scripts
+                local explorerClone = Instance.new("Frame")
+                explorerClone.Name = "ExplorerClone"
+                explorerClone.Size = UDim2.new(1, -24, 1, -48)
+                explorerClone.Position = UDim2.new(0, 12, 0, 112)
+                explorerClone.BackgroundTransparency = 1
+                explorerClone.Parent = aiBubble
+
+                local scroll = Instance.new("ScrollingFrame")
+                scroll.Size = UDim2.new(1, 0, 1, 0)
+                scroll.Position = UDim2.new(0, 0, 0, 0)
+                scroll.BackgroundTransparency = 1
+                scroll.BorderSizePixel = 0
+                scroll.ScrollBarThickness = 6
+                scroll.Parent = explorerClone
+
+                local layout = Instance.new("UIListLayout")
+                layout.SortOrder = Enum.SortOrder.LayoutOrder
+                layout.Padding = UDim.new(0, 8)
+                layout.Parent = scroll
+
+                -- gather scripts from common containers
+                local function gatherScripts(limit)
+                    limit = limit or 300
+                    local places = {
+                        workspace,
+                        game:GetService("ReplicatedStorage"),
+                        game:GetService("StarterGui"),
+                        game:GetService("StarterPack"),
+                        game:GetService("StarterPlayer"),
+                        game:GetService("CoreGui")
+                    }
+                    local groups = {}
+                    local count = 0
+                    for _, root in ipairs(places) do
+                        pcall(function()
+                            for _, d in ipairs(root:GetDescendants()) do
+                                if (d:IsA("Script") or d:IsA("LocalScript")) and d.Parent then
+                                    local key = tostring(d.Parent:GetFullName()) or d.Parent.Name
+                                    groups[key] = groups[key] or {parent = d.Parent, scripts = {}}
+                                    table.insert(groups[key].scripts, d)
+                                    count = count + 1
+                                    if count >= limit then return end
+                                end
+                            end
+                        end)
+                        if count >= limit then break end
+                    end
+                    return groups
+                end
+
+                local function tryDecompile(scr)
+                    local ok, src = pcall(function()
+                        if typeof(syn) == "table" and typeof(syn.decompile) == "function" then
+                            return syn.decompile(scr)
+                        end
+                        if typeof(krnl) == "table" and typeof(krnl.decompile) == "function" then
+                            return krnl.decompile(scr)
+                        end
+                        if typeof(decompile) == "function" then
+                            return decompile(scr)
+                        end
+                        if scr and scr.Source then return scr.Source end
+                        return nil
+                    end)
+                    if ok and src then return src end
+                    return "-- Could not decompile or read source for this script."
+                end
+
+                local function positionRight(frame)
+                    local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+                    if not pg then
+                        frame.Position = UDim2.new(1, -420, 0.06, 0)
+                        frame.AnchorPoint = Vector2.new(0, 0)
+                        return
+                    end
+                    local uranium = pg:FindFirstChild("UraniumUltimate")
+                    if uranium and uranium:IsA("ScreenGui") then
+                        local target = nil
+                        for _, c in ipairs(uranium:GetChildren()) do
+                            if c:IsA("Frame") then target = c; break end
+                        end
+                        if target and target.AbsolutePosition and target.AbsoluteSize then
+                            frame.Position = UDim2.new(0, target.AbsolutePosition.X + target.AbsoluteSize.X + 8, 0, target.AbsolutePosition.Y)
+                            return
+                        end
+                    end
+                    frame.Position = UDim2.new(1, -420, 0.06, 0)
+                end
+
+                local function showSourceWindow(sourceText, title)
+                    title = title or "Source"
+                    -- create or reuse right viewer
+                    local right = gui:FindFirstChild("UraniumSourceViewer")
+                    if right and right.Parent then right:Destroy() end
+                    right = Instance.new("Frame")
+                    right.Name = "UraniumSourceViewer"
+                    right.Size = UDim2.new(0, 420, 0, 520)
+                    right.BackgroundColor3 = Color3.fromRGB(18,18,24)
+                    right.BorderSizePixel = 0
+                    right.ZIndex = 60
+                    right.Parent = gui
+
+                    local corner = Instance.new("UICorner", right)
+                    corner.CornerRadius = UDim.new(0, 8)
+
+                    local hdr = Instance.new("TextLabel", right)
+                    hdr.Size = UDim2.new(1, -16, 0, 28)
+                    hdr.Position = UDim2.new(0, 8, 0, 8)
+                    hdr.BackgroundTransparency = 1
+                    hdr.Text = title
+                    hdr.TextColor3 = Color3.fromRGB(230,230,230)
+                    hdr.Font = Enum.Font.GothamBold
+                    hdr.TextSize = 14
+
+                    local close = Instance.new("TextButton", right)
+                    close.Size = UDim2.new(0, 28, 0, 24)
+                    close.Position = UDim2.new(1, -36, 0, 6)
+                    close.Text = "X"
+                    close.BackgroundColor3 = Color3.fromRGB(45,30,30)
+                    close.BorderSizePixel = 0
+                    Instance.new("UICorner", close).CornerRadius = UDim.new(0,6)
+                    close.MouseButton1Click:Connect(function() right:Destroy() end)
+
+                    local box = Instance.new("TextBox", right)
+                    box.Size = UDim2.new(1, -16, 1, -48)
+                    box.Position = UDim2.new(0, 8, 0, 40)
+                    box.MultiLine = true
+                    box.TextWrapped = true
+                    box.ClearTextOnFocus = false
+                    box.Text = sourceText or ""
+                    box.TextColor3 = Color3.fromRGB(230,230,230)
+                    box.TextSize = 14
+                    box.Font = Enum.Font.Code
+                    box.BackgroundColor3 = Color3.fromRGB(12,12,16)
+                    box.BorderSizePixel = 0
+                    box.TextXAlignment = Enum.TextXAlignment.Left
+                    box.TextYAlignment = Enum.TextYAlignment.Top
+
+                    positionRight(right)
+                    -- update position if UraniumUltimate moves
+                    local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+                    if pg then
+                        local uranium = pg:FindFirstChild("UraniumUltimate")
+                        if uranium and uranium:IsA("ScreenGui") then
+                            for _, c in ipairs(uranium:GetChildren()) do
+                                if c:IsA("Frame") then
+                                    c:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() positionRight(right) end)
+                                    c:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() positionRight(right) end)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+
+                local groups = gatherScripts(400)
+                for gk, g in pairs(groups) do
+                    local header = Instance.new("TextLabel")
+                    header.Size = UDim2.new(1, -16, 0, 20)
+                    header.BackgroundTransparency = 1
+                    header.Text = "Folder: " .. (g.parent and g.parent.Name or gk)
+                    header.TextColor3 = Color3.fromRGB(200,200,200)
+                    header.Font = Enum.Font.GothamBold
+                    header.TextSize = 13
+                    header.Parent = scroll
+
+                    for _, scr in ipairs(g.scripts) do
+                        local btn = Instance.new("TextButton")
+                        btn.Size = UDim2.new(1, -24, 0, 28)
+                        btn.BackgroundColor3 = Color3.fromRGB(28,28,34)
+                        btn.BorderSizePixel = 0
+                        btn.Text = scr.Name .. " [" .. scr.ClassName .. "]"
+                        btn.TextColor3 = Color3.fromRGB(220,220,220)
+                        btn.Font = Enum.Font.Gotham
+                        btn.TextSize = 13
+                        btn.TextXAlignment = Enum.TextXAlignment.Left
+                        btn.Parent = scroll
+                        btn.MouseButton1Click:Connect(function()
+                            local source = tryDecompile(scr)
+                            print("[DecodePro] Potential vulnerabilities for " .. (scr.Name or "script") .. ": (see source viewer)")
+                            showSourceWindow(source, scr.Name)
+                        end)
+                    end
+                end
+
+                isSending = false
+            end)
+
+            closeBtn.MouseButton1Click:Connect(function()
+                if left and oldParent then
+                    left.Parent = oldParent
+                    left.Position = oldPos
+                    left.Size = oldSize
+                    UpdateCanvas()
+                end
+                if aiBubble and aiBubble.Parent then
+                    aiBubble:Destroy()
+                end
             end)
         end)
 
