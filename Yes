@@ -62,7 +62,6 @@ local function createAIModule(config)
     local hasShownWelcomeAnimation = false
     local lastQueriedTarget = nil
     local sydecCreatedGuis = {}
-    local decodeProRunning = false
 
     local INPUT_HEIGHT = 70
     local INPUT_LINE_HEIGHT = 20
@@ -78,9 +77,17 @@ local function createAIModule(config)
     local welcomeOverlay = nil
     local suggestionButtonsFrame = nil
     local minimizedAdviceButton = nil
-    local scannerGuiRef = nil
 
     local showDarkButtons, showNormalButtons, switchToDarkAI
+
+    local DecompileFunc
+    if syn and syn.decompile then
+        DecompileFunc = syn.decompile
+    elseif krnl and krnl.decompile then
+        DecompileFunc = krnl.decompile
+    elseif type(decompile) == "function" then
+        DecompileFunc = decompile
+    end
 
     local SCAN_REMOTES_CODE = [[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = game:GetService("Players").LocalPlayer
@@ -713,7 +720,7 @@ populateTools()]]
         updateInputHeight()
     end
 
-    local function spawnTypingBubble(textOverride)
+    local function spawnTypingBubble()
         local typingFrame = Instance.new("Frame")
         typingFrame.Size = UDim2.new(1, 0, 0, 0)
         typingFrame.AutomaticSize = Enum.AutomaticSize.Y
@@ -741,7 +748,7 @@ populateTools()]]
         local typingText = Instance.new("TextLabel")
         typingText.Size = UDim2.new(0, 60, 0, 16)
         typingText.BackgroundTransparency = 1
-        typingText.Text = textOverride or "● ● ●"
+        typingText.Text = "● ● ●"
         typingText.TextColor3 = Color3.fromRGB(255, 255, 255)
         typingText.TextSize = 16
         typingText.Font = Enum.Font.GothamBold
@@ -762,13 +769,11 @@ populateTools()]]
         updateCanvasAndScroll(true)
 
         local dotAnim = run_service.Heartbeat:Connect(function()
-            if typingText.Text:match("●") then
-                local phase = math.floor(tick() * 2) % 4
-                typingText.Text = phase == 0 and "● ○ ○" or phase == 1 and "○ ● ○" or phase == 2 and "○ ○ ●" or "○ ○ ○"
-            end
+            local phase = math.floor(tick() * 2) % 4
+            typingText.Text = phase == 0 and "● ○ ○" or phase == 1 and "○ ● ○" or phase == 2 and "○ ○ ●" or "○ ○ ○"
         end)
 
-        return typingFrame, dotAnim, typingText
+        return typingFrame, dotAnim
     end
 
     local LUA_KEYWORDS = {
@@ -921,7 +926,7 @@ populateTools()]]
         return result
     end
 
-    local function buildMessageBubble(sender, paddedBubbleWidth, hasCode, isGui, forceWidth)
+    local function buildMessageBubble(sender, paddedBubbleWidth, hasCode, isGui)
         local messageFrame = Instance.new("Frame")
         messageFrame.Size = UDim2.new(1, 0, 0, 0)
         messageFrame.AutomaticSize = Enum.AutomaticSize.Y
@@ -967,11 +972,6 @@ populateTools()]]
             profileName.Parent = profileContainer
         end
 
-        local effectiveWidth = forceWidth or paddedBubbleWidth
-        if isGui then
-            effectiveWidth = math.max(effectiveWidth, 780)
-        end
-
         local messageContent = Instance.new("ImageLabel")
         if hasCode then
             messageContent.Image = ""
@@ -995,7 +995,7 @@ populateTools()]]
         if hasCode then
             messageContent.Size = UDim2.new(0, CODE_BLOCK_WIDTH + 12, 0, 0)
         else
-            messageContent.Size = UDim2.new(0, effectiveWidth, 0, 0)
+            messageContent.Size = UDim2.new(0, paddedBubbleWidth, 0, 0)
         end
         messageContent.AutomaticSize = Enum.AutomaticSize.Y
         messageContent.BorderSizePixel = 0
@@ -4373,287 +4373,190 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         isSending = false
     end
 
-    local vulnerabilityFindings = nil
-    local scannerGui = nil
-
-    local function runVulnerabilityScanner(parentFrame)
-        local findings = {}
-        local totalFindings = 0
-        local function consolePrint(msg)
-            totalFindings = totalFindings + 1
-            table.insert(findings, msg)
+    local function GetSource(scr)
+        local ok, src = pcall(function() return scr.Source end)
+        if ok and src and src ~= "" then
+            return src
         end
-
-        local Players = game:GetService("Players")
-        local LocalPlayer = Players.LocalPlayer
-        local TweenService = game:GetService("TweenService")
-
-        local DecompileFunc
-        if syn and syn.decompile then
-            DecompileFunc = syn.decompile
-        elseif krnl and krnl.decompile then
-            DecompileFunc = krnl.decompile
-        elseif type(decompile) == "function" then
-            DecompileFunc = decompile
-        end
-
-        local MAX_SCRIPTS = 120
-        local YIELD_RATE = 50
-        local BATCH_SIZE = 25
-        local MIN_SCORE = 25
-
-        local EXCLUDE_PATTERNS = {"Roblox","CoreScript","BuiltIn","Debug","Rbx","Signal","Animation","Tween","Particle","Sound","Music","Chat","Notification","Popup","Menu","Button","Label","Frame","ScrollingFrame","TextLabel","TextButton","ImageLabel","ImageButton","ScreenGui","PlayerGui","StarterGui","Camera","Viewport","Bloom","Blur","SunRays","ColorCorrection","Sky","Clouds","Fog","Grass","Tree","Flower","Rock","Sand","Water","Fire","Smoke","Sparkle","Trail","Beam","Explosion","Hole","Terrain","Material","Lighting","Atmosphere","DepthOfField","PostEffect","MotionBlur","GaussianBlur"}
-
-        local VULN_KEYWORDS = {"Remote","Network","Handler","Manager","Controller","Service","Client","Server","Data","Save","Load","Database","Shop","Inventory","Currency","Coin","Gem","Gold","Trade","Transfer","Gift","Admin","Moderator","Mod","Ban","Kick","Punish","AntiCheat","Anti","Exploit","Security","Auth","Token","Secret","Key","Password","Salt","Hash","Encrypt","Decrypt","Command","Cmd","Action","Filter","Whitelist","Blacklist","Permission","Role","Rank","Teleport","Spawn","Respawn","Config","Setting","Hook","Callback","Detect","Detection","Log","Report","Lock","Unlock","Door","Gate","Chest","Loot","Drop","Rare","Legendary","VIP","Donor","Premium","Pass","Gamepass","Badge","Achievement","Reward","Resolver","Validator","Checker","Guard","Protect","Shield","Armor","Resistance","Immunity","Vulnerable","Weakness","Critical","Heal","Damage","Hitbox","Collision","Raycast","Weapon","Gun","Bullet","Projectile","Skill","Spell","Magic","Ability","Quest","Mission","Event","Trigger","ReplicatedStorage","ReplicatedFirst","Module","Util","Helper","Core","Main","Game","Logic","System","StarterPlayerScripts","StarterCharacterScripts","PlayerScripts","Backpack","Character"}
-
-        local SCAN_PATHS = {
-            game:GetService("ReplicatedStorage"),
-            game:GetService("ReplicatedFirst"),
-            game:GetService("StarterGui"),
-            game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"),
-            game:GetService("StarterPlayer"):FindFirstChild("StarterCharacterScripts"),
-            LocalPlayer:FindFirstChild("PlayerGui"),
-            LocalPlayer:FindFirstChild("PlayerScripts"),
-            LocalPlayer:FindFirstChild("Backpack"),
-            LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        }
-
-        local function GetSource(scr)
-            local ok, src = pcall(function() return scr.Source end)
+        if DecompileFunc then
+            ok, src = pcall(DecompileFunc, scr)
             if ok and src and src ~= "" then
                 return src
             end
-            if DecompileFunc then
-                ok, src = pcall(DecompileFunc, scr)
-                if ok and src and src ~= "" then
-                    return src
-                end
-            end
-            return nil
         end
+        return nil
+    end
 
-        local function GetPath(inst)
-            local path = inst.Name
-            local parent = inst.Parent
-            local depth = 0
-            while parent and parent ~= game and depth < 15 do
-                path = parent.Name .. "." .. path
-                parent = parent.Parent
-                depth = depth + 1
+    local function RemoveComments(code)
+        if not code or code == "" then return code end
+        local lines = {}
+        for line in code:gmatch("[^\r\n]*") do
+            local pos = line:find("%-%-")
+            if pos then
+                line = line:sub(1, pos - 1)
             end
-            return "game." .. path
+            table.insert(lines, line)
         end
+        return table.concat(lines, "\n")
+    end
 
-        local function ShouldExclude(script)
-            local path = GetPath(script):lower()
-            for _, pat in ipairs(EXCLUDE_PATTERNS) do
-                if path:find(pat:lower()) then
-                    return true
-                end
-            end
-            return false
-        end
-
-        local function IsRelevant(script)
-            local path = GetPath(script):lower()
-            if script:IsA("ModuleScript") then
-                return true
-            end
-            for _, kw in ipairs(VULN_KEYWORDS) do
-                if path:find(kw:lower()) then
-                    return true
-                end
-            end
-            return false
-        end
-
-        local function Score(script)
-            local path = GetPath(script):lower()
-            local score = 0
-            if path:find("remote") then score = score + 50 end
-            if path:find("network") then score = score + 45 end
-            if path:find("admin") or path:find("moderator") or path:find("ban") or path:find("kick") or path:find("punish") then score = score + 60 end
-            if path:find("anticheat") or path:find("antiexploit") or path:find("antihack") or path:find("security") or path:find("auth") or path:find("authentication") then score = score + 65 end
-            if path:find("token") or path:find("secret") or path:find("key") or path:find("password") or path:find("salt") or path:find("hash") or path:find("encrypt") then score = score + 70 end
-            if path:find("data") or path:find("save") or path:find("load") or path:find("database") then score = score + 40 end
-            if path:find("shop") or path:find("inventory") or path:find("currency") or path:find("coin") or path:find("gem") or path:find("gold") then score = score + 50 end
-            if path:find("trade") or path:find("transfer") or path:find("gift") then score = score + 50 end
-            if path:find("command") or path:find("cmd") then score = score + 45 end
-            if path:find("filter") or path:find("whitelist") or path:find("blacklist") then score = score + 55 end
-            if path:find("permission") or path:find("role") or path:find("rank") then score = score + 40 end
-            if path:find("teleport") or path:find("spawn") or path:find("respawn") then score = score + 35 end
-            if path:find("handler") then score = score + 35 end
-            if path:find("manager") or path:find("controller") then score = score + 30 end
-            if path:find("replicatedstorage") or path:find("replicatedfirst") then score = score + 40 end
-            if path:find("detect") or path:find("detection") or path:find("log") or path:find("report") then score = score + 40 end
-            if path:find("hook") or path:find("callback") or path:find("listener") then score = score + 35 end
-            if path:find("resolver") or path:find("validator") or path:find("checker") or path:find("guard") then score = score + 45 end
-            if path:find("weapon") or path:find("gun") or path:find("bullet") or path:find("projectile") or path:find("hitbox") or path:find("damage") then score = score + 30 end
-            if path:find("skill") or path:find("spell") or path:find("ability") or path:find("magic") then score = score + 25 end
-            if path:find("quest") or path:find("mission") or path:find("event") or path:find("trigger") then score = score + 25 end
-            if path:find("loot") or path:find("drop") or path:find("chest") or path:find("reward") then score = score + 30 end
-            if path:find("config") or path:find("setting") then score = score + 25 end
-            if path:find("service") or path:find("system") then score = score + 15 end
-            if path:find("game") or path:find("logic") then score = score + 15 end
-            if script:IsA("ModuleScript") then score = score + 10 end
-            return score
-        end
-
-        local function GetFolderName(script)
-            local p = script.Parent
-            return p and p.Name or "Unknown"
-        end
+    local function HighlightLua(code)
+        if not code or code == "" then return "" end
+        local keywords = {"function","end","if","then","else","elseif","for","while","repeat","until","do","return","local","break","continue","goto","in","and","or","not","nil","true","false","require","pcall","xpcall","spawn","delay","wait","tick","time","typeof","type","rawequal","rawget","rawset","setmetatable","getmetatable","next","pairs","ipairs","select","unpack","pack","newproxy","self"}
+        local builtins = {"print","warn","error","assert","Instance","Color3","Vector2","Vector3","CFrame","UDim2","UDim","NumberSequence","NumberRange","ColorSequence","Ray","Region3","Rect","BrickColor","Enum","TweenInfo","Axes","Faces","RaycastParams","DateTime","Random","string","table","math","coroutine","os","debug","utf8","bit32","workspace","game","script","shared","plugin","settings","stats","UserInputService","TweenService","RunService","Players","Lighting","Workspace","ReplicatedStorage","ReplicatedFirst"}
 
         local function EscapeHTML(s)
             return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
         end
 
-        local function RemoveComments(code)
-            if not code or code == "" then
-                return code
-            end
-            local lines = {}
-            for line in code:gmatch("[^\r\n]*") do
-                local pos = line:find("%-%-")
-                if pos then
-                    line = line:sub(1, pos - 1)
-                end
-                table.insert(lines, line)
-            end
-            return table.concat(lines, "\n")
+        local result = {}
+        local lines = {}
+        for line in code:gmatch("([^\n]*)\n?") do
+            lines[#lines+1] = line
         end
-
-        local function HighlightLua(code)
-            if not code or code == "" then
-                return ""
-            end
-            local keywords = {"function","end","if","then","else","elseif","for","while","repeat","until","do","return","local","break","continue","goto","in","and","or","not","nil","true","false","require","pcall","xpcall","spawn","delay","wait","tick","time","typeof","type","rawequal","rawget","rawset","setmetatable","getmetatable","next","pairs","ipairs","select","unpack","pack","newproxy","self"}
-            local builtins = {"print","warn","error","assert","Instance","Color3","Vector2","Vector3","CFrame","UDim2","UDim","NumberSequence","NumberRange","ColorSequence","Ray","Region3","Rect","BrickColor","Enum","TweenInfo","Axes","Faces","RaycastParams","DateTime","Random","string","table","math","coroutine","os","debug","utf8","bit32","workspace","game","script","shared","plugin","settings","stats","UserInputService","TweenService","RunService","Players","Lighting","Workspace","ReplicatedStorage","ReplicatedFirst"}
-            local result = {}
-            local lines = {}
-            for line in code:gmatch("([^\n]*)\n?") do
-                lines[#lines+1] = line
-            end
-            if #lines == 0 then
-                lines = {code}
-            end
-            for _, line in ipairs(lines) do
-                local escaped = EscapeHTML(line)
-                local hl = ""
-                local pos = 1
-                while pos <= #escaped do
-                    local remaining = escaped:sub(pos)
-                    local longStrMatch = remaining:match("^(\[\[.-\]\])")
-                    local dqMatch = remaining:match('^"(.-)"')
-                    local sqMatch = remaining:match("^'(.-)'")
-                    local hexMatch = remaining:match("^(0[xX][%da-fA-F]+)")
-                    local numMatch = remaining:match("^(%d+%.?%d*[eE]?[%+%-]?%d*)")
-                    if not numMatch then
-                        numMatch = remaining:match("^(%.%d+)")
-                    end
-                    local wordMatch = remaining:match("^([%a_][%w_]*)")
-                    local best = nil
-                    local bestLen = 0
-                    local bestType = nil
-                    if longStrMatch and #longStrMatch > bestLen then
-                        best = longStrMatch
-                        bestLen = #longStrMatch
-                        bestType = "longstring"
-                    end
-                    if dqMatch and (#dqMatch + 2) > bestLen then
-                        best = dqMatch
-                        bestLen = #dqMatch + 2
-                        bestType = "string"
-                    end
-                    if sqMatch and (#sqMatch + 2) > bestLen then
-                        best = sqMatch
-                        bestLen = #sqMatch + 2
-                        bestType = "string"
-                    end
-                    if hexMatch and #hexMatch > bestLen then
-                        best = hexMatch
-                        bestLen = #hexMatch
-                        bestType = "number"
-                    end
-                    if numMatch and #numMatch > bestLen then
-                        best = numMatch
-                        bestLen = #numMatch
-                        bestType = "number"
-                    end
-                    if wordMatch and #wordMatch > bestLen then
-                        best = wordMatch
-                        bestLen = #wordMatch
-                        bestType = "word"
-                    end
-                    if best then
-                        if bestType == "longstring" then
-                            hl = hl .. "<font color='#98c379'>" .. best .. "</font>"
-                        elseif bestType == "string" then
-                            local q = best:sub(1,1)
-                            local content = best:sub(2, #best-1)
-                            local esc = EscapeHTML(content)
-                            local processed = ""
-                            local ep = 1
-                            while ep <= #esc do
-                                local er = esc:sub(ep)
-                                local es = er:match("^(\\[%a%d\\'\"])")
-                                if es then
-                                    processed = processed .. "<font color='#e5c07b'>" .. es .. "</font>"
-                                    ep = ep + #es
-                                else
-                                    processed = processed .. esc:sub(ep, ep)
-                                    ep = ep + 1
-                                end
+        if #lines == 0 then
+            lines = {code}
+        end
+        for _, line in ipairs(lines) do
+            local escaped = EscapeHTML(line)
+            local hl = ""
+            local pos = 1
+            while pos <= #escaped do
+                local remaining = escaped:sub(pos)
+                local longStrMatch = remaining:match("^(\[\[.-\]\])")
+                local dqMatch = remaining:match('^"(.-)"')
+                local sqMatch = remaining:match("^'(.-)'")
+                local hexMatch = remaining:match("^(0[xX][%da-fA-F]+)")
+                local numMatch = remaining:match("^(%d+%.?%d*[eE]?[%+%-]?%d*)")
+                if not numMatch then
+                    numMatch = remaining:match("^(%.%d+)")
+                end
+                local wordMatch = remaining:match("^([%a_][%w_]*)")
+                local best = nil
+                local bestLen = 0
+                local bestType = nil
+                if longStrMatch and #longStrMatch > bestLen then
+                    best = longStrMatch
+                    bestLen = #longStrMatch
+                    bestType = "longstring"
+                end
+                if dqMatch and (#dqMatch + 2) > bestLen then
+                    best = dqMatch
+                    bestLen = #dqMatch + 2
+                    bestType = "string"
+                end
+                if sqMatch and (#sqMatch + 2) > bestLen then
+                    best = sqMatch
+                    bestLen = #sqMatch + 2
+                    bestType = "string"
+                end
+                if hexMatch and #hexMatch > bestLen then
+                    best = hexMatch
+                    bestLen = #hexMatch
+                    bestType = "number"
+                end
+                if numMatch and #numMatch > bestLen then
+                    best = numMatch
+                    bestLen = #numMatch
+                    bestType = "number"
+                end
+                if wordMatch and #wordMatch > bestLen then
+                    best = wordMatch
+                    bestLen = #wordMatch
+                    bestType = "word"
+                end
+                if best then
+                    if bestType == "longstring" then
+                        hl = hl .. "<font color='#98c379'>" .. best .. "</font>"
+                    elseif bestType == "string" then
+                        local q = best:sub(1,1)
+                        local content = best:sub(2, #best-1)
+                        local esc = EscapeHTML(content)
+                        local processed = ""
+                        local ep = 1
+                        while ep <= #esc do
+                            local er = esc:sub(ep)
+                            local es = er:match("^(\\[%a%d\\'\"])")
+                            if es then
+                                processed = processed .. "<font color='#e5c07b'>" .. es .. "</font>"
+                                ep = ep + #es
+                            else
+                                processed = processed .. esc:sub(ep, ep)
+                                ep = ep + 1
                             end
-                            hl = hl .. "<font color='#98c379'>" .. q .. processed .. q .. "</font>"
-                        elseif bestType == "number" then
-                            hl = hl .. "<font color='#d19a66'>" .. best .. "</font>"
-                        elseif bestType == "word" then
-                            local lower = best:lower()
-                            local isKw = false
-                            local isB = false
-                            for _, k in ipairs(keywords) do
-                                if k == lower then
-                                    isKw = true
+                        end
+                        hl = hl .. "<font color='#98c379'>" .. q .. processed .. q .. "</font>"
+                    elseif bestType == "number" then
+                        hl = hl .. "<font color='#d19a66'>" .. best .. "</font>"
+                    elseif bestType == "word" then
+                        local lower = best:lower()
+                        local isKw = false
+                        local isB = false
+                        for _, k in ipairs(keywords) do
+                            if k == lower then
+                                isKw = true
+                                break
+                            end
+                        end
+                        if not isKw then
+                            for _, b in ipairs(builtins) do
+                                if b == lower then
+                                    isB = true
                                     break
                                 end
                             end
-                            if not isKw then
-                                for _, b in ipairs(builtins) do
-                                    if b == lower then
-                                        isB = true
-                                        break
-                                    end
-                                end
-                            end
-                            if isKw then
-                                hl = hl .. "<font color='#c678dd'>" .. best .. "</font>"
-                            elseif isB then
-                                hl = hl .. "<font color='#61afef'>" .. best .. "</font>"
-                            else
-                                hl = hl .. best
-                            end
                         end
-                        pos = pos + bestLen
-                    else
-                        hl = hl .. escaped:sub(pos, pos)
-                        pos = pos + 1
+                        if isKw then
+                            hl = hl .. "<font color='#c678dd'>" .. best .. "</font>"
+                        elseif isB then
+                            hl = hl .. "<font color='#61afef'>" .. best .. "</font>"
+                        else
+                            hl = hl .. best
+                        end
                     end
+                    pos = pos + bestLen
+                else
+                    hl = hl .. escaped:sub(pos, pos)
+                    pos = pos + 1
                 end
-                result[#result+1] = hl
             end
-            return table.concat(result, "\n")
+            result[#result+1] = hl
         end
+        return table.concat(result, "\n")
+    end
 
-        local PANEL_W = 360
-        local PANEL_H = 496
+    local function showDecodePro()
+        if isSending then return end
+        isSending = true
+
+        addAIMessage("user", "Hi Sydec, please list potential software vulnerabilities in the game in folders. Each folder should contain scripts, and when I click on any of these scripts, it should decompile and I should be able to see its contents. Also, print the potential vulnerabilities as console messages. Finally, when I ask you questions, please provide the necessary answers using the script you've written.")
+        table.insert(conversationHistory, {role = "user", content = "Hi Sydec, please list potential software vulnerabilities in the game in folders. Each folder should contain scripts, and when I click on any of these scripts, it should decompile and I should be able to see its contents. Also, print the potential vulnerabilities as console messages. Finally, when I ask you questions, please provide the necessary answers using the script you've written."})
+
+        local typingFrame, dotAnim = spawnTypingBubble()
+
+        task.spawn(function()
+            task.wait(5)
+
+            dotAnim:Disconnect()
+            typingFrame:Destroy()
+            isSending = false
+
+            createVulnerabilityUI()
+        end)
+    end
+
+    local function createVulnerabilityUI()
+        if not chatDisplay or not chatLayout then return end
+
+        local maxTextWidth = chatDisplay.AbsoluteSize.X * 0.7 - 40 - 60
+        local paddedBubbleWidth = math.min(maxTextWidth + 32, chatDisplay.AbsoluteSize.X * 0.7)
+        local messageFrame, messageContent = buildMessageBubble("ai", paddedBubbleWidth, false, true)
 
         local left = Instance.new("Frame")
-        left.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
-        left.Position = UDim2.new(0, 0, 0, 0)
+        left.Size = UDim2.new(1, 0, 0, 420)
         left.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
         left.BorderSizePixel = 0
-        left.Parent = parentFrame
+        left.Parent = messageContent
 
         Instance.new("UICorner", left).CornerRadius = UDim.new(0, 10)
 
@@ -4665,11 +4568,10 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         ltitle.Size = UDim2.new(1, 0, 0, 40)
         ltitle.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
         ltitle.BorderSizePixel = 0
-        ltitle.Text = "EXPLORER"
+        ltitle.Text = "VULNERABILITY EXPLORER"
         ltitle.TextColor3 = Color3.fromRGB(255, 255, 255)
         ltitle.TextSize = 15
         ltitle.Font = Enum.Font.GothamBold
-
         Instance.new("UICorner", ltitle).CornerRadius = UDim.new(0, 10)
 
         local scroll = Instance.new("ScrollingFrame", left)
@@ -4681,21 +4583,29 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
         scroll.ScrollBarThickness = 6
         scroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-
         Instance.new("UICorner", scroll).CornerRadius = UDim.new(0, 8)
 
         local layout = Instance.new("UIListLayout", scroll)
         layout.SortOrder = Enum.SortOrder.LayoutOrder
         layout.Padding = UDim.new(0, 3)
 
-        local right = Instance.new("Frame", parentFrame)
-        right.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
-        right.Position = UDim2.new(1, 10, 0, 0)
+        local function UpdateCanvas()
+            scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+        end
+        layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
+
+        local rightGui = Instance.new("ScreenGui")
+        rightGui.Name = "SourceViewer_Pro"
+        rightGui.ResetOnSpawn = false
+        rightGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+        local right = Instance.new("Frame", rightGui)
+        right.Size = UDim2.new(0, 400, 0, 500)
+        right.Position = UDim2.new(1, 20, 0.5, -250)
         right.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
         right.BorderSizePixel = 0
         right.Visible = false
         right.Active = true
-
         Instance.new("UICorner", right).CornerRadius = UDim.new(0, 10)
 
         local rStroke = Instance.new("UIStroke", right)
@@ -4711,7 +4621,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         rtitle.TextSize = 15
         rtitle.Font = Enum.Font.GothamBold
         rtitle.ZIndex = 2
-
         Instance.new("UICorner", rtitle).CornerRadius = UDim.new(0, 10)
 
         local rClose = Instance.new("TextButton", right)
@@ -4726,15 +4635,17 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         rClose.ZIndex = 10
         rClose.Active = true
         rClose.AutoButtonColor = true
-
         Instance.new("UICorner", rClose).CornerRadius = UDim.new(0, 6)
 
         rClose.MouseEnter:Connect(function()
             rClose.BackgroundColor3 = Color3.fromRGB(70, 35, 35)
         end)
-
         rClose.MouseLeave:Connect(function()
             rClose.BackgroundColor3 = Color3.fromRGB(40, 25, 25)
+        end)
+        rClose.MouseButton1Click:Connect(function()
+            right.Visible = false
+            rightGui:Destroy()
         end)
 
         local cbox = Instance.new("ScrollingFrame", right)
@@ -4747,7 +4658,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         cbox.ScrollBarThickness = 6
         cbox.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
         cbox.Active = true
-
         Instance.new("UICorner", cbox).CornerRadius = UDim.new(0, 8)
 
         local ctext = Instance.new("TextLabel", cbox)
@@ -4764,7 +4674,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         ctext.RichText = true
         ctext.Visible = false
         ctext.AutomaticSize = Enum.AutomaticSize.Y
-
         ctext:GetPropertyChangedSignal("TextBounds"):Connect(function()
             task.wait()
             cbox.CanvasSize = UDim2.new(0, 0, 0, ctext.AbsoluteSize.Y + 16)
@@ -4810,80 +4719,25 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         })
         loadGradLine.Offset = Vector2.new(1, 0)
 
-        local tweenInfo = TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, false, 0)
-        local slideInInfo = TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-
-        local currentTextTween = nil
-        local currentLineTween = nil
-        local currentDecompileId = 0
-        local rightOpen = false
-
-        rClose.MouseButton1Click:Connect(function()
-            rightOpen = false
-            right.Visible = false
-            right.Position = UDim2.new(1, 10, 0, 0)
-            ctext.Text = ""
-            ctext.Visible = false
-            loadFrame.Visible = true
-            loadText.Text = "Decompiling..."
-            rtitle.Text = "SOURCE VIEWER"
-            currentDecompileId = currentDecompileId + 1
-            if currentTextTween then
-                currentTextTween:Cancel()
-                currentTextTween = nil
-            end
-            if currentLineTween then
-                currentLineTween:Cancel()
-                currentLineTween = nil
-            end
-        end)
-
-        local function UpdateCanvas()
-            scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+        local function positionRightPanel()
+            if not container or not container.Parent then return end
+            local absPos = container.AbsolutePosition
+            local absSize = container.AbsoluteSize
+            right.Position = UDim2.new(0, absPos.X + absSize.X + 20, 0, absPos.Y + (absSize.Y - right.Size.Y.Offset) / 2)
+            right.Visible = true
         end
-
-        layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
-
-        local function ClearScroll()
-            for _, v in ipairs(scroll:GetChildren()) do
-                if v:IsA("TextButton") or v:IsA("Frame") then
-                    v:Destroy()
-                end
-            end
-        end
-
-        local activeBtn = nil
 
         local function ShowSourceViewer(scr)
-            currentDecompileId = currentDecompileId + 1
-            local requestId = currentDecompileId
-
-            ctext.Visible = false
             loadFrame.Visible = true
+            ctext.Visible = false
             loadText.Text = "Decompiling... " .. scr.Name
             rtitle.Text = scr.Name
 
-            if currentTextTween then
-                currentTextTween:Cancel()
-            end
-            if currentLineTween then
-                currentLineTween:Cancel()
-            end
-
-            loadGrad.Offset = Vector2.new(1, 0)
-            loadGradLine.Offset = Vector2.new(1, 0)
-
-            currentTextTween = TweenService:Create(loadGrad, tweenInfo, {Offset = Vector2.new(-1, 0)})
-            currentLineTween = TweenService:Create(loadGradLine, tweenInfo, {Offset = Vector2.new(-1, 0)})
-            currentTextTween:Play()
-            currentLineTween:Play()
-
-            if not rightOpen then
-                rightOpen = true
-                right.Visible = true
-                right.Position = UDim2.new(1, 10, 0, 0)
-                TweenService:Create(right, slideInInfo, {Position = UDim2.new(0, PANEL_W + 10, 0, 0)}):Play()
-            end
+            local tweenInfo = TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, false, 0)
+            local textTween = TweenService:Create(loadGrad, tweenInfo, {Offset = Vector2.new(-1, 0)})
+            local lineTween = TweenService:Create(loadGradLine, tweenInfo, {Offset = Vector2.new(-1, 0)})
+            textTween:Play()
+            lineTween:Play()
 
             task.spawn(function()
                 local src = GetSource(scr)
@@ -4893,16 +4747,8 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
                 local highlighted = HighlightLua(src or "")
                 task.wait(0.2)
 
-                if requestId ~= currentDecompileId then
-                    return
-                end
-
-                if currentTextTween then
-                    currentTextTween:Cancel()
-                end
-                if currentLineTween then
-                    currentLineTween:Cancel()
-                end
+                textTween:Cancel()
+                lineTween:Cancel()
 
                 loadFrame.Visible = false
                 ctext.Visible = true
@@ -4912,6 +4758,8 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
                     ctext.Text = "<font color='#e06c75'>Source unavailable</font>"
                 end
             end)
+
+            positionRightPanel()
         end
 
         local function RenderFolder(folderName, scripts, orderIndex)
@@ -4931,21 +4779,15 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             fBtn.Parent = scroll
 
             Instance.new("UICorner", fBtn).CornerRadius = UDim.new(0, 6)
-
             local fStroke = Instance.new("UIStroke", fBtn)
             fStroke.Color = Color3.fromRGB(70, 70, 70)
             fStroke.Thickness = 1
 
             fBtn.MouseEnter:Connect(function()
-                if not expanded then
-                    fBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-                end
+                if not expanded then fBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40) end
             end)
-
             fBtn.MouseLeave:Connect(function()
-                if not expanded then
-                    fBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-                end
+                if not expanded then fBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25) end
             end)
 
             fBtn.MouseButton1Click:Connect(function()
@@ -4969,7 +4811,6 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
                     cPad.PaddingBottom = UDim.new(0, 4)
 
                     Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
-
                     local cStroke = Instance.new("UIStroke", container)
                     cStroke.Color = Color3.fromRGB(50, 50, 50)
                     cStroke.Thickness = 1
@@ -4989,29 +4830,18 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
                         sBtn.Parent = container
 
                         Instance.new("UICorner", sBtn).CornerRadius = UDim.new(0, 4)
-
                         local sStroke = Instance.new("UIStroke", sBtn)
                         sStroke.Color = Color3.fromRGB(60, 60, 60)
                         sStroke.Thickness = 1
 
                         sBtn.MouseEnter:Connect(function()
-                            if sBtn ~= activeBtn then
-                                sBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-                            end
+                            sBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
                         end)
-
                         sBtn.MouseLeave:Connect(function()
-                            if sBtn ~= activeBtn then
-                                sBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                            end
+                            sBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
                         end)
 
                         sBtn.MouseButton1Click:Connect(function()
-                            if activeBtn then
-                                activeBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                            end
-                            activeBtn = sBtn
-                            sBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
                             ShowSourceViewer(scr)
                         end)
                     end
@@ -5032,48 +4862,118 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         end
 
         local function Scan()
-            ClearScroll()
-            ctext.Text = ""
-            ctext.Visible = false
-            loadFrame.Visible = true
-            loadText.Text = "Decompiling..."
-            rtitle.Text = "SOURCE VIEWER"
-            ltitle.Text = "SCANNING..."
-            activeBtn = nil
-
-            if rightOpen then
-                rightOpen = false
-                right.Visible = false
-                right.Position = UDim2.new(1, 10, 0, 0)
-                currentDecompileId = currentDecompileId + 1
-                if currentTextTween then
-                    currentTextTween:Cancel()
-                    currentTextTween = nil
-                end
-                if currentLineTween then
-                    currentLineTween:Cancel()
-                    currentLineTween = nil
+            for _, v in ipairs(scroll:GetChildren()) do
+                if v:IsA("TextButton") or v:IsA("Frame") then
+                    v:Destroy()
                 end
             end
 
+            ltitle.Text = "SCANNING..."
             local scripts = {}
-            for _, root in ipairs(SCAN_PATHS) do
-                if not root then
-                    continue
+            local SCAN_PATHS = {
+                game:GetService("ReplicatedStorage"),
+                game:GetService("ReplicatedFirst"),
+                game:GetService("StarterGui"),
+                game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"),
+                game:GetService("StarterPlayer"):FindFirstChild("StarterCharacterScripts"),
+                game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui"),
+                game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts"),
+                game:GetService("Players").LocalPlayer:FindFirstChild("Backpack"),
+                game:GetService("Players").LocalPlayer.Character or game:GetService("Players").LocalPlayer.CharacterAdded:Wait()
+            }
+
+            local EXCLUDE_PATTERNS = {"Roblox","CoreScript","BuiltIn","Debug","Rbx","Signal","Animation","Tween","Particle","Sound","Music","Chat","Notification","Popup","Menu","Button","Label","Frame","ScrollingFrame","TextLabel","TextButton","ImageLabel","ImageButton","ScreenGui","PlayerGui","StarterGui","Camera","Viewport","Bloom","Blur","SunRays","ColorCorrection","Sky","Clouds","Fog","Grass","Tree","Flower","Rock","Sand","Water","Fire","Smoke","Sparkle","Trail","Beam","Explosion","Hole","Terrain","Material","Lighting","Atmosphere","DepthOfField","PostEffect","MotionBlur","GaussianBlur"}
+
+            local VULN_KEYWORDS = {"Remote","Network","Handler","Manager","Controller","Service","Client","Server","Data","Save","Load","Database","Shop","Inventory","Currency","Coin","Gem","Gold","Trade","Transfer","Gift","Admin","Moderator","Mod","Ban","Kick","Punish","AntiCheat","Anti","Exploit","Security","Auth","Token","Secret","Key","Password","Salt","Hash","Encrypt","Decrypt","Command","Cmd","Action","Filter","Whitelist","Blacklist","Permission","Role","Rank","Teleport","Spawn","Respawn","Config","Setting","Hook","Callback","Detect","Detection","Log","Report","Lock","Unlock","Door","Gate","Chest","Loot","Drop","Rare","Legendary","VIP","Donor","Premium","Pass","Gamepass","Badge","Achievement","Reward","Resolver","Validator","Checker","Guard","Protect","Shield","Armor","Resistance","Immunity","Vulnerable","Weakness","Critical","Heal","Damage","Hitbox","Collision","Raycast","Weapon","Gun","Bullet","Projectile","Skill","Spell","Magic","Ability","Quest","Mission","Event","Trigger","ReplicatedStorage","ReplicatedFirst","Module","Util","Helper","Core","Main","Game","Logic","System","StarterPlayerScripts","StarterCharacterScripts","PlayerScripts","Backpack","Character"}
+
+            local function GetPath(inst)
+                local path = inst.Name
+                local parent = inst.Parent
+                local depth = 0
+                while parent and parent ~= game and depth < 15 do
+                    path = parent.Name .. "." .. path
+                    parent = parent.Parent
+                    depth = depth + 1
                 end
-                local desc = root:GetDescendants()
-                for i, obj in ipairs(desc) do
-                    if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                        if not ShouldExclude(obj) and IsRelevant(obj) then
-                            local s = Score(obj)
-                            if s >= MIN_SCORE then
-                                scripts[#scripts+1] = obj
+                return "game." .. path
+            end
+
+            local function ShouldExclude(script)
+                local path = GetPath(script):lower()
+                for _, pat in ipairs(EXCLUDE_PATTERNS) do
+                    if path:find(pat:lower()) then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            local function IsRelevant(script)
+                local path = GetPath(script):lower()
+                if script:IsA("ModuleScript") then
+                    return true
+                end
+                for _, kw in ipairs(VULN_KEYWORDS) do
+                    if path:find(kw:lower()) then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            local function Score(script)
+                local path = GetPath(script):lower()
+                local score = 0
+                if path:find("remote") then score = score + 50 end
+                if path:find("network") then score = score + 45 end
+                if path:find("admin") or path:find("moderator") or path:find("ban") or path:find("kick") or path:find("punish") then score = score + 60 end
+                if path:find("anticheat") or path:find("antiexploit") or path:find("antihack") or path:find("security") or path:find("auth") or path:find("authentication") then score = score + 65 end
+                if path:find("token") or path:find("secret") or path:find("key") or path:find("password") or path:find("salt") or path:find("hash") or path:find("encrypt") then score = score + 70 end
+                if path:find("data") or path:find("save") or path:find("load") or path:find("database") then score = score + 40 end
+                if path:find("shop") or path:find("inventory") or path:find("currency") or path:find("coin") or path:find("gem") or path:find("gold") then score = score + 50 end
+                if path:find("trade") or path:find("transfer") or path:find("gift") then score = score + 50 end
+                if path:find("command") or path:find("cmd") then score = score + 45 end
+                if path:find("filter") or path:find("whitelist") or path:find("blacklist") then score = score + 55 end
+                if path:find("permission") or path:find("role") or path:find("rank") then score = score + 40 end
+                if path:find("teleport") or path:find("spawn") or path:find("respawn") then score = score + 35 end
+                if path:find("handler") then score = score + 35 end
+                if path:find("manager") or path:find("controller") then score = score + 30 end
+                if path:find("replicatedstorage") or path:find("replicatedfirst") then score = score + 40 end
+                if path:find("detect") or path:find("detection") or path:find("log") or path:find("report") then score = score + 40 end
+                if path:find("hook") or path:find("callback") or path:find("listener") then score = score + 35 end
+                if path:find("resolver") or path:find("validator") or path:find("checker") or path:find("guard") then score = score + 45 end
+                if path:find("weapon") or path:find("gun") or path:find("bullet") or path:find("projectile") or path:find("hitbox") or path:find("damage") then score = score + 30 end
+                if path:find("skill") or path:find("spell") or path:find("ability") or path:find("magic") then score = score + 25 end
+                if path:find("quest") or path:find("mission") or path:find("event") or path:find("trigger") then score = score + 25 end
+                if path:find("loot") or path:find("drop") or path:find("chest") or path:find("reward") then score = score + 30 end
+                if path:find("config") or path:find("setting") then score = score + 25 end
+                if path:find("service") or path:find("system") then score = score + 15 end
+                if path:find("game") or path:find("logic") then score = score + 15 end
+                if script:IsA("ModuleScript") then score = score + 10 end
+                return score
+            end
+
+            local function GetFolderName(script)
+                local p = script.Parent
+                return p and p.Name or "Unknown"
+            end
+
+            for _, root in ipairs(SCAN_PATHS) do
+                if root then
+                    local desc = root:GetDescendants()
+                    for i, obj in ipairs(desc) do
+                        if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+                            if not ShouldExclude(obj) and IsRelevant(obj) then
+                                local s = Score(obj)
+                                if s >= 25 then
+                                    scripts[#scripts+1] = obj
+                                end
                             end
                         end
-                    end
-                    if i % YIELD_RATE == 0 then
-                        ltitle.Text = "SCANNING... (" .. #scripts .. ")"
-                        task.wait()
+                        if i % 50 == 0 then
+                            ltitle.Text = "SCANNING... (" .. #scripts .. ")"
+                            task.wait()
+                        end
                     end
                 end
             end
@@ -5082,6 +4982,7 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
                 return Score(a) > Score(b)
             end)
 
+            local MAX_SCRIPTS = 120
             local trimmed = {}
             for i = 1, math.min(#scripts, MAX_SCRIPTS) do
                 trimmed[i] = scripts[i]
@@ -5104,7 +5005,7 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
 
             for i, name in ipairs(sortedNames) do
                 RenderFolder(name, folders[name], i)
-                if i % BATCH_SIZE == 0 then
+                if i % 25 == 0 then
                     task.wait()
                 end
             end
@@ -5114,633 +5015,19 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             ltitle.Text = "EXPLORER (" .. #trimmed .. ")"
         end
 
+        local function consoleReport()
+            print("\n============================================================")
+            print("  VULNERABILITY SCANNER - CONSOLE REPORT")
+            print("============================================================")
+            print("[SCANNER] Vulnerability scan completed.")
+            print("============================================================")
+        end
+
         Scan()
-
-        print("\n")
-        print("============================================================")
-        print("  VULNERABILITY SCANNER - CONSOLE REPORT")
-        print("============================================================")
-        print("\n")
-
-        local MarketplaceService = game:GetService("MarketplaceService")
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-        local Workspace = game:GetService("Workspace")
-
-        consolePrint("--- EXECUTOR ENVIRONMENT DETECTION ---")
-        local envChecks = {"getgenv","getrenv","getsenv","getgc","hookfunction","hookmetamethod","cloneref","firetouchinterest","fireclickdetector","firesignal"}
-        for _, check in ipairs(envChecks) do
-            local ok, res = pcall(function()
-                if check == "decompile" then
-                    return DecompileFunc ~= nil
-                else
-                    return type(_G[check]) == "function" or type(getfenv()[check]) == "function"
-                end
-            end)
-            if ok and res then
-                consolePrint("[EXECUTOR] Found active executor function: " .. check .. "()")
-            else
-                print("[EXECUTOR] Not found: " .. check .. "()")
-            end
-        end
-        if DecompileFunc then
-            consolePrint("[EXECUTOR] Decompile function is active - a high-level executor is running")
-        else
-            print("[EXECUTOR] Decompile function is not available")
-        end
-
-        print("\n--- REMOTE EVENT / FUNCTION SCAN ---")
-        local remotes = {}
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("UnreliableRemoteEvent") then
-                table.insert(remotes, obj)
-            end
-        end
-        print("Found " .. #remotes .. " remote objects total")
-        for _, rem in ipairs(remotes) do
-            local path = GetPath(rem)
-            local name = rem.Name:lower()
-            local isFunc = rem:IsA("RemoteFunction")
-            local prefix = isFunc and "[RF]" or "[RE]"
-            if name:find("admin") or name:find("ban") or name:find("kick") or name:find("mod") or name:find("punish") then
-                consolePrint("[REMOTE] " .. prefix .. " Admin remote found: '" .. rem.Name .. "' at " .. path .. " - Can be used to ban/kick players if server has no permission checks")
-            elseif name:find("data") or name:find("save") or name:find("load") or name:find("store") then
-                consolePrint("[REMOTE] " .. prefix .. " Data remote found: '" .. rem.Name .. "' at " .. path .. " - Can corrupt or rollback player data")
-            elseif name:find("buy") or name:find("purchase") or name:find("shop") or name:find("coin") or name:find("gem") or name:find("gold") or name:find("trade") then
-                consolePrint("[REMOTE] " .. prefix .. " Economy remote found: '" .. rem.Name .. "' at " .. path .. " - Can be exploited for free items or currency")
-            elseif name:find("tp") or name:find("teleport") or name:find("spawn") or name:find("move") then
-                consolePrint("[REMOTE] " .. prefix .. " Movement remote found: '" .. rem.Name .. "' at " .. path .. " - Can be used to teleport anywhere")
-            elseif name:find("weapon") or name:find("damage") or name:find("hit") or name:find("gun") or name:find("bullet") then
-                consolePrint("[REMOTE] " .. prefix .. " Combat remote found: '" .. rem.Name .. "' at " .. path .. " - Can be used for fake damage or instant kill")
-            elseif name:find("equip") or name:find("tool") or name:find("item") or name:find("inventory") then
-                consolePrint("[REMOTE] " .. prefix .. " Inventory remote found: '" .. rem.Name .. "' at " .. path .. " - Can spawn items or duplicate tools")
-            elseif name:find("give") or name:find("gift") or name:find("reward") then
-                consolePrint("[REMOTE] " .. prefix .. " Reward remote found: '" .. rem.Name .. "' at " .. path .. " - Can be spammed for infinite rewards")
-            else
-                print("[REMOTE] " .. prefix .. " General remote: '" .. rem.Name .. "' at " .. path)
-            end
-        end
-        if #remotes == 0 then
-            print("[REMOTE] No remotes found")
-        end
-
-        print("\n--- BACKDOOR / SUSPICIOUS SCRIPT SCAN ---")
-        local suspiciousPatterns = {
-            "require","loadstring","getfenv","setfenv","HttpGet","HttpPost","request",
-            "syn.","krnl.","fluxus.","backdoor","infected","virus","payload"
-        }
-        local checked = {}
-        local backdoorCount = 0
-        local function scanBackdoor(obj, depth)
-            if depth > 5 or checked[obj] then return end
-            checked[obj] = true
-            if obj:IsA("ModuleScript") or obj:IsA("LocalScript") or obj:IsA("Script") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    local found = {}
-                    for _, pat in ipairs(suspiciousPatterns) do
-                        if lower:find(pat:lower()) then
-                            table.insert(found, pat)
-                        end
-                    end
-                    if #found > 0 then
-                        backdoorCount = backdoorCount + 1
-                        consolePrint("[BACKDOOR] Suspicious script found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Contains patterns: " .. table.concat(found, ", "))
-                    end
-                end
-            end
-            if obj:IsA("Folder") or obj:IsA("Model") or obj:IsA("Configuration") or obj:IsA("ReplicatedStorage") then
-                for _, c in ipairs(obj:GetChildren()) do
-                    scanBackdoor(c, depth + 1)
-                end
-            end
-        end
-        scanBackdoor(ReplicatedStorage, 0)
-        scanBackdoor(game:GetService("StarterGui"), 0)
-        scanBackdoor(game:GetService("StarterPlayer"), 0)
-        scanBackdoor(Workspace, 0)
-        if backdoorCount == 0 then
-            print("[BACKDOOR] No suspicious patterns found")
-        end
-
-        print("\n--- ADMIN ABUSE DETECTION ---")
-        local adminKeywords = {"admin","moderator","mod","ban","kick","punish","mute","jail","command","cmd","permission","whitelist","blacklist"}
-        local adminRemoteCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-                local name = obj.Name:lower()
-                for _, kw in ipairs(adminKeywords) do
-                    if name:find(kw) then
-                        adminRemoteCount = adminRemoteCount + 1
-                        consolePrint("[ADMIN] Admin remote found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Can be used for admin abuse if server has no permission checks")
-                        break
-                    end
-                end
-            end
-        end
-        if adminRemoteCount == 0 then
-            print("[ADMIN] No admin remotes found")
-        end
-
-        print("\n--- DATASTORE SCAN ---")
-        local dsKeywords = {"datastore","setasync","updateasync","getasync","incrementasync","removeasync"}
-        local dsCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("Script") or obj:IsA("ModuleScript") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    for _, kw in ipairs(dsKeywords) do
-                        if lower:find(kw) then
-                            dsCount = dsCount + 1
-                            consolePrint("[DATASTORE] DataStore usage found in '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Uses '" .. kw .. "'")
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        if dsCount == 0 then
-            print("[DATASTORE] No DataStore usage found")
-        end
-
-        print("\n--- ECONOMY / MARKETPLACE SCAN ---")
-        local econKeywords = {"marketplaceservice","developerproduct","gamepass","promptpurchase","processreceipt","robux","currency","coin","gem","gold","money","cash","buy","purchase","shop","sell","trade"}
-        local econCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    for _, kw in ipairs(econKeywords) do
-                        if lower:find(kw) then
-                            econCount = econCount + 1
-                            consolePrint("[ECONOMY] Economy system found in '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Uses '" .. kw .. "'")
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        if econCount == 0 then
-            print("[ECONOMY] No economy system found")
-        end
-
-        print("\n--- COMBAT SYSTEM SCAN ---")
-        local combatKeywords = {"damage","health","humanoid","take","hit","weapon","gun","bullet","projectile","kill","heal","hitbox","reach","aura","aim","shoot","attack","combat"}
-        local combatCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    for _, kw in ipairs(combatKeywords) do
-                        if lower:find(kw) then
-                            combatCount = combatCount + 1
-                            consolePrint("[COMBAT] Combat script found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Contains '" .. kw .. "'")
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        if combatCount == 0 then
-            print("[COMBAT] No combat system found")
-        end
-
-        print("\n--- MOVEMENT SYSTEM SCAN ---")
-        local moveKeywords = {"walkspeed","jumppower","cframe","velocity","vector3","position","teleport","fly","noclip","speed","walk","move","hipheight","rootpart"}
-        local moveCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    for _, kw in ipairs(moveKeywords) do
-                        if lower:find(kw) then
-                            moveCount = moveCount + 1
-                            consolePrint("[MOVEMENT] Movement script found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Contains '" .. kw .. "'")
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        if moveCount == 0 then
-            print("[MOVEMENT] No movement system found")
-        end
-
-        print("\n--- ANTICHEAT SYSTEM SCAN ---")
-        local acKeywords = {"anticheat","antiexploit","antihack","security","detect","detection","check","validation","verify","exploit","hack","cheat","log","report","flag"}
-        local acCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    for _, kw in ipairs(acKeywords) do
-                        if lower:find(kw) then
-                            acCount = acCount + 1
-                            print("[ANTICHEAT] Security script found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Contains '" .. kw .. "'")
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        if acCount == 0 then
-            print("[ANTICHEAT] No AntiCheat system detected")
-        end
-
-        print("\n--- INVENTORY / TOOL SCAN ---")
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
-        local toolCount = 0
-        if backpack then
-            for _, t in ipairs(backpack:GetChildren()) do
-                if t:IsA("Tool") then
-                    toolCount = toolCount + 1
-                    print("[INVENTORY] Tool in backpack: '" .. t.Name .. "'")
-                end
-            end
-        end
-        local StarterPack = game:FindFirstChild("StarterPack")
-        if StarterPack then
-            for _, t in ipairs(StarterPack:GetChildren()) do
-                if t:IsA("Tool") then
-                    print("[INVENTORY] Starter tool: '" .. t.Name .. "'")
-                end
-            end
-        end
-        if toolCount == 0 then
-            print("[INVENTORY] No tools found in backpack")
-        end
-        local invRemoteCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-                local name = obj.Name:lower()
-                if name:find("equip") or name:find("tool") or name:find("item") or name:find("backpack") or name:find("inventory") or name:find("give") then
-                    invRemoteCount = invRemoteCount + 1
-                    consolePrint("[INVENTORY] Inventory remote found: '" .. obj.Name .. "' at " .. GetPath(obj))
-                end
-            end
-        end
-        if invRemoteCount == 0 then
-            print("[INVENTORY] No inventory remotes found")
-        end
-
-        print("\n--- LEADERSTATS SCAN ---")
-        local stats = LocalPlayer:FindFirstChild("leaderstats")
-        if stats then
-            print("Leaderstats found:")
-            for _, v in ipairs(stats:GetChildren()) do
-                if v:IsA("IntValue") or v:IsA("NumberValue") or v:IsA("StringValue") then
-                    consolePrint("[LEADERSTAT] Stat found: '" .. v.Name .. "' = " .. tostring(v.Value) .. " (" .. v.ClassName .. ")")
-                end
-            end
-        else
-            print("[LEADERSTAT] No leaderstats found")
-        end
-
-        print("\n--- PROXIMITY PROMPT SCAN ---")
-        local promptCount = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") then
-                promptCount = promptCount + 1
-                local action = obj.ActionText
-                local parent = obj.Parent and obj.Parent.Name or "nil"
-                local dist = obj.MaxActivationDistance
-                if action:lower():find("buy") or action:lower():find("purchase") or action:lower():find("open") or action:lower():find("collect") then
-                    consolePrint("[PROMPT] Interactive prompt found: '" .. action .. "' on '" .. parent .. "' (distance: " .. tostring(dist) .. ")")
-                else
-                    print("[PROMPT] Prompt found: '" .. action .. "' on '" .. parent .. "' (distance: " .. tostring(dist) .. ")")
-                end
-            end
-        end
-        if promptCount == 0 then
-            print("[PROMPT] No ProximityPrompts found")
-        end
-
-        print("\n--- CLICK DETECTOR SCAN ---")
-        local clickCount = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("ClickDetector") then
-                clickCount = clickCount + 1
-                local parent = obj.Parent and obj.Parent.Name or "nil"
-                print("[CLICK] ClickDetector found on '" .. parent .. "' (distance: " .. tostring(obj.MaxActivationDistance) .. ")")
-            end
-        end
-        if clickCount == 0 then
-            print("[CLICK] No ClickDetectors found")
-        end
-
-        print("\n--- TOUCH INTEREST SCAN ---")
-        local touchCount = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("TouchInterest") or obj:IsA("TouchTransmitter") then
-                touchCount = touchCount + 1
-                local parent = obj.Parent and obj.Parent.Name or "nil"
-                print("[TOUCH] TouchInterest found on '" .. parent .. "'")
-            end
-        end
-        if touchCount == 0 then
-            print("[TOUCH] No TouchInterest objects found")
-        end
-
-        print("\n--- HIDDEN GUI SCAN ---")
-        local hiddenCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("ScreenGui") or obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
-                if obj.Name:lower():find("admin") or obj.Name:lower():find("mod") or obj.Name:lower():find("ban") or obj.Name:lower():find("debug") or obj.Name:lower():find("dev") or obj.Name:lower():find("hidden") then
-                    if not obj.Enabled then
-                        hiddenCount = hiddenCount + 1
-                        consolePrint("[HIDDEN GUI] Hidden GUI found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " (Enabled: false)")
-                    end
-                end
-            end
-        end
-        if hiddenCount == 0 then
-            print("[HIDDEN GUI] No hidden GUIs found")
-        end
-
-        print("\n--- PHYSICS / VEHICLE SCAN ---")
-        print("[PHYSICS] Gravity: " .. tostring(Workspace.Gravity))
-        local vehicleCount = 0
-        local noclipCount = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
-                vehicleCount = vehicleCount + 1
-                print("[VEHICLE] Seat/vehicle found: '" .. obj.Name .. "' at " .. GetPath(obj))
-            end
-            if obj:IsA("BasePart") and obj.CanCollide == false then
-                if obj.Name:lower():find("floor") or obj.Name:lower():find("ground") or obj.Name:lower():find("map") then
-                    noclipCount = noclipCount + 1
-                    consolePrint("[PHYSICS] Noclip surface found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " (CanCollide: false)")
-                end
-            end
-        end
-        if vehicleCount == 0 then
-            print("[VEHICLE] No vehicles found")
-        end
-        if noclipCount == 0 then
-            print("[PHYSICS] No noclip surfaces found")
-        end
-
-        print("\n--- GAMEPASS INFO ---")
-        local gpOk, gpInfo = pcall(function()
-            return MarketplaceService:GetProductInfo(game.PlaceId, Enum.InfoType.GamePass)
-        end)
-        if gpOk and gpInfo then
-            print("[GAMEPASS] Found gamepass: '" .. tostring(gpInfo.Name) .. "' - Price: " .. tostring(gpInfo.PriceInRobux or "N/A") .. " Robux")
-        else
-            print("[GAMEPASS] Could not fetch gamepass info")
-        end
-
-        print("\n--- MODULE SCRIPT SCAN ---")
-        local modCount = 0
-        for _, obj in ipairs(game:GetDescendants()) do
-            if obj:IsA("ModuleScript") then
-                local src = GetSource(obj)
-                if src then
-                    local lower = src:lower()
-                    local hasRemote = lower:find("remote") or lower:find("fireserver") or lower:find("invokeserver")
-                    local hasData = lower:find("datastore") or lower:find("save") or lower:find("load")
-                    local hasMarket = lower:find("marketplace") or lower:find("purchase") or lower:find("buy")
-                    if hasRemote or hasData or hasMarket then
-                        modCount = modCount + 1
-                        local tags = {}
-                        if hasRemote then table.insert(tags, "remote") end
-                        if hasData then table.insert(tags, "datastore") end
-                        if hasMarket then table.insert(tags, "marketplace") end
-                        consolePrint("[MODULE] ModuleScript found: '" .. obj.Name .. "' at " .. GetPath(obj) .. " - Contains " .. table.concat(tags, ", "))
-                    end
-                end
-            end
-        end
-        if modCount == 0 then
-            print("[MODULE] No suspicious ModuleScripts found")
-        end
-
-        print("\n--- PLAYER NAME SCAN ---")
-        local suspNames = {"admin","moderator","owner","developer","dev","staff","builder","scripter","gameowner"}
-        local suspCount = 0
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer then
-                local name = p.Name:lower()
-                for _, sn in ipairs(suspNames) do
-                    if name:find(sn) then
-                        suspCount = suspCount + 1
-                        consolePrint("[PLAYER] Suspicious player name found: '" .. p.Name .. "' (Display: " .. p.DisplayName .. ", UserId: " .. p.UserId .. ") - Contains '" .. sn .. "'")
-                        break
-                    end
-                end
-            end
-        end
-        if suspCount == 0 then
-            print("[PLAYER] No suspicious player names found")
-        end
-
-        print("\n")
-        print("============================================================")
-        print("  SCAN COMPLETE")
-        print("============================================================")
-        print("Total findings: " .. totalFindings)
-        print("Press F9 to view the full report in the Developer Console")
-        print("============================================================")
-
-        scannerGui = {left = left, right = right, scroll = scroll, layout = layout, cbox = cbox, ctext = ctext, loadFrame = loadFrame}
-        vulnerabilityFindings = findings
-        return findings, folders, trimmed
-    end
-
-    local function showDecodePro()
-        if isSending or decodeProRunning then return end
-        decodeProRunning = true
-        isSending = true
-        if not chatDisplay or not chatLayout then
-            decodeProRunning = false
-            isSending = false
-            return
-        end
-        if suggestionButtonsFrame then
-            animateHideSuggestionButtons()
-        end
-        addAIMessage("user", "Hi Sydec, please list potential software vulnerabilities in the game in folders. Each folder should contain scripts, and when I click on any of these scripts, it should decompile and I should be able to see its contents. Also, print the potential vulnerabilities as console messages. Finally, when I ask you questions, please provide the necessary answers using the script you've written.")
-        local typingFrame, dotAnim = spawnTypingBubble()
-        task.wait(5)
-        dotAnim:Disconnect()
-        typingFrame:Destroy()
-
-        local maxTextWidth = chatDisplay.AbsoluteSize.X * 0.7 - 40 - 60
-        local paddedBubbleWidth = math.min(maxTextWidth + 32, chatDisplay.AbsoluteSize.X * 0.7)
-        local forceWidth = math.max(paddedBubbleWidth, 780)
-        local _, messageContent = buildMessageBubble("ai", paddedBubbleWidth, false, true, forceWidth)
-
-        local scannerContainer = Instance.new("Frame")
-        scannerContainer.Size = UDim2.new(1, 0, 0, 500)
-        scannerContainer.BackgroundTransparency = 1
-        scannerContainer.LayoutOrder = 1
-        scannerContainer.Parent = messageContent
-
-        local findings, folders, scripts = runVulnerabilityScanner(scannerContainer)
+        consoleReport()
 
         task.wait()
-        updateCanvasAndScroll()
-
-        local totalScripts = 0
-        for _, list in pairs(folders) do
-            totalScripts = totalScripts + #list
-        end
-
-        local folderNames = {}
-        for name in pairs(folders) do
-            table.insert(folderNames, name)
-        end
-        table.sort(folderNames)
-
-        addAIMessage("ai", "🔍 Scanner loaded. Found " .. #folderNames .. " folders containing " .. totalScripts .. " scripts. I will now decompile each script and report findings.")
-
-        task.wait()
-        updateCanvasAndScroll()
-
-        local decompileTally = 0
-        local DecompileFunc
-        if syn and syn.decompile then
-            DecompileFunc = syn.decompile
-        elseif krnl and krnl.decompile then
-            DecompileFunc = krnl.decompile
-        elseif type(decompile) == "function" then
-            DecompileFunc = decompile
-        end
-
-        local function GetSource(scr)
-            local ok, src = pcall(function() return scr.Source end)
-            if ok and src and src ~= "" then
-                return src
-            end
-            if DecompileFunc then
-                ok, src = pcall(DecompileFunc, scr)
-                if ok and src and src ~= "" then
-                    return src
-                end
-            end
-            return nil
-        end
-
-        local function RemoveComments(code)
-            if not code or code == "" then return code end
-            local lines = {}
-            for line in code:gmatch("[^\r\n]*") do
-                local pos = line:find("%-%-")
-                if pos then
-                    line = line:sub(1, pos - 1)
-                end
-                table.insert(lines, line)
-            end
-            return table.concat(lines, "\n")
-        end
-
-        local thinkingFrame, thinkingAnim, thinkingText = spawnTypingBubble("● ● ●")
-        thinkingText.Text = "● ● ●"
-
-        local function updateThinkingBubble(text)
-            if thinkingText and thinkingText.Parent then
-                thinkingText.Text = text
-            end
-        end
-
-        local function stopThinkingBubble()
-            if thinkingAnim then
-                thinkingAnim:Disconnect()
-                thinkingAnim = nil
-            end
-            if thinkingFrame and thinkingFrame.Parent then
-                thinkingFrame:Destroy()
-                thinkingFrame = nil
-            end
-            thinkingText = nil
-        end
-
-        local allReports = {}
-
-        for _, folderName in ipairs(folderNames) do
-            local scriptList = folders[folderName]
-            updateThinkingBubble("decompiling " .. folderName .. " folder ... (" .. #scriptList .. " scripts)")
-
-            local folderReport = "📁 " .. folderName .. " (" .. #scriptList .. " scripts):\n"
-            local decompiledCount = 0
-
-            for i, scr in ipairs(scriptList) do
-                local src = GetSource(scr)
-                if src then
-                    src = RemoveComments(src)
-                    local lines = #src:gmatch("\n") + 1
-                    local size = string.len(src)
-                    folderReport = folderReport .. "  ├─ " .. scr.Name .. " (" .. lines .. " lines, " .. size .. " chars)\n"
-                    decompiledCount = decompiledCount + 1
-                else
-                    folderReport = folderReport .. "  ├─ " .. scr.Name .. " ❌ (decompile failed)\n"
-                end
-                decompileTally = decompileTally + 1
-                if i % 2 == 0 then
-                    updateThinkingBubble("decompiling " .. folderName .. " ... (" .. decompileTally .. "/" .. totalScripts .. " done)")
-                    task.wait(0.02)
-                end
-                task.wait()
-            end
-
-            table.insert(allReports, folderReport)
-
-            if #allReports > 0 then
-                local combined = table.concat(allReports, "\n\n")
-                if #combined > 4000 then
-                    local remaining = {}
-                    for j = #allReports - 1, 1, -1 do
-                        table.insert(remaining, 1, allReports[j])
-                    end
-                    allReports = remaining
-                end
-            end
-
-            local reportText = "✅ " .. folderName .. ": decompiled " .. decompiledCount .. "/" .. #scriptList .. " scripts successfully."
-            addAIMessage("ai", reportText)
-            task.wait()
-            updateCanvasAndScroll()
-        end
-
-        stopThinkingBubble()
-
-        local summary = "📊 **Decompilation Summary**\n\n"
-        summary = summary .. "Total folders: " .. #folderNames .. "\n"
-        summary = summary .. "Total scripts: " .. totalScripts .. "\n"
-        summary = summary .. "Decompiled: " .. decompileTally .. "\n\n"
-
-        for _, report in ipairs(allReports) do
-            summary = summary .. report .. "\n\n"
-        end
-
-        local finalSummary = "🔍 **Full Scan Report**\n\n" .. summary
-
-        local foundFindings = vulnerabilityFindings or {}
-        if #foundFindings > 0 then
-            finalSummary = finalSummary .. "\n**Vulnerability Findings (" .. #foundFindings .. "):**\n"
-            for i = 1, math.min(#foundFindings, 30) do
-                finalSummary = finalSummary .. "• " .. foundFindings[i] .. "\n"
-            end
-            if #foundFindings > 30 then
-                finalSummary = finalSummary .. "... and " .. (#foundFindings - 30) .. " more findings (see console for full list)."
-            end
-        else
-            finalSummary = finalSummary .. "\nNo critical vulnerabilities were detected in the scanned scripts."
-        end
-
-        table.insert(conversationHistory, {role = "assistant", content = finalSummary})
-        addAIMessageStreamed("ai", finalSummary)
-
-        task.wait()
-        updateCanvasAndScroll()
-
-        decodeProRunning = false
-        isSending = false
+        updateCanvasAndScroll(true)
     end
 
     function showDarkButtons()
@@ -5834,7 +5121,7 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
         end
 
         createBtn("Decode Pro", function()
-            if isSending or decodeProRunning then return end
+            if isSending then return end
             showDecodePro()
         end)
 
@@ -6041,6 +5328,11 @@ warn("Universal FPS Gui by Sydearr Loaded!")]==]
             end
             return btn
         end
+
+        createBtn("Decode Pro", function()
+            if isSending then return end
+            showDecodePro()
+        end)
 
         createBtn("Say Hello", function()
             conversationStarted = true
