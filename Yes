@@ -2042,7 +2042,7 @@ populateTools()]]
         addAIMessage("user", "Decode Pro")
         table.insert(conversationHistory, {role = "user", content = "Decode Pro"})
         local typingFrame, dotAnim = spawnTypingBubble()
-        task.wait(5)
+        task.wait(3)
         dotAnim:Disconnect()
         typingFrame:Destroy()
 
@@ -2064,7 +2064,7 @@ populateTools()]]
         local descLbl = Instance.new("TextLabel")
         descLbl.Size = UDim2.new(1, 0, 0, 40)
         descLbl.BackgroundTransparency = 1
-        descLbl.Text = "The source explorer is rendered below inside this AI message bubble. Use the button to open a full source viewer if needed."
+        descLbl.Text = "Preview explorer GUI is embedded in this AI bubble. Click a script to open the full source viewer."
         descLbl.TextColor3 = Color3.fromRGB(200, 200, 220)
         descLbl.TextSize = 13
         descLbl.Font = Enum.Font.Gotham
@@ -2086,7 +2086,6 @@ populateTools()]]
                 player:FindFirstChild("Backpack"),
                 player.Character or player.CharacterAdded:Wait()
             }
-
             local scripts = {}
             for _, root in ipairs(roots) do
                 if root then
@@ -2094,7 +2093,7 @@ populateTools()]]
                         if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
                             if not ShouldExclude(obj) and IsRelevant(obj) then
                                 local s = Score(obj)
-                                if s >= 25 then
+                                if s >= MIN_SCORE then
                                     scripts[#scripts + 1] = obj
                                 end
                             end
@@ -2102,81 +2101,126 @@ populateTools()]]
                     end
                 end
             end
-
             table.sort(scripts, function(a, b)
                 return Score(a) > Score(b)
             end)
             return scripts
         end
 
-        local function renderDecodeProExplorer(parent)
-            local explorer = Instance.new("Frame")
-            explorer.Size = UDim2.new(1, 0, 0, 0)
-            explorer.AutomaticSize = Enum.AutomaticSize.Y
-            explorer.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
-            explorer.BorderSizePixel = 0
-            explorer.LayoutOrder = 4
-            explorer.Parent = parent
+        local function renderDecodeProPreview(parent)
+            local preview = Instance.new("Frame")
+            preview.Size = UDim2.new(1, 0, 0, 240)
+            preview.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+            preview.BorderSizePixel = 0
+            preview.LayoutOrder = 4
+            preview.Parent = parent
 
-            local explorerCorner = Instance.new("UICorner")
-            explorerCorner.CornerRadius = UDim.new(0, 10)
-            explorerCorner.Parent = explorer
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 12)
+            corner.Parent = preview
 
-            local header = Instance.new("TextLabel")
-            header.Size = UDim2.new(1, 0, 0, 26)
-            header.BackgroundTransparency = 1
-            header.Text = "Decode Pro Explorer"
-            header.TextColor3 = Color3.fromRGB(235, 235, 255)
-            header.Font = Enum.Font.GothamBold
-            header.TextSize = 14
-            header.TextXAlignment = Enum.TextXAlignment.Left
-            header.LayoutOrder = 1
-            header.Parent = explorer
+            local leftPanel = Instance.new("Frame")
+            leftPanel.Size = UDim2.new(0.58, 0, 1, 0)
+            leftPanel.Position = UDim2.new(0, 0, 0, 0)
+            leftPanel.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+            leftPanel.BorderSizePixel = 0
+            leftPanel.Parent = preview
 
-            local info = Instance.new("TextLabel")
-            info.Size = UDim2.new(1, 0, 0, 20)
-            info.BackgroundTransparency = 1
-            info.Text = "Browse folders and scripts below. Click a script to open the full source viewer."
-            info.TextColor3 = Color3.fromRGB(180, 180, 210)
-            info.Font = Enum.Font.Gotham
-            info.TextSize = 12
-            info.TextWrapped = true
-            info.TextXAlignment = Enum.TextXAlignment.Left
-            info.LayoutOrder = 2
-            info.Parent = explorer
+            Instance.new("UICorner", leftPanel).CornerRadius = UDim.new(0, 10)
 
-            local sourceScroll = Instance.new("ScrollingFrame")
-            sourceScroll.Size = UDim2.new(1, -12, 0, 260)
-            sourceScroll.Position = UDim2.new(0, 6, 0, 54)
-            sourceScroll.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
-            sourceScroll.BorderSizePixel = 0
-            sourceScroll.ScrollBarThickness = 6
-            sourceScroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-            sourceScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-            sourceScroll.Parent = explorer
+            local leftTitle = Instance.new("TextLabel")
+            leftTitle.Size = UDim2.new(1, 0, 0, 30)
+            leftTitle.Position = UDim2.new(0, 0, 0, 0)
+            leftTitle.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+            leftTitle.BorderSizePixel = 0
+            leftTitle.Text = "EXPLORER"
+            leftTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+            leftTitle.Font = Enum.Font.GothamBold
+            leftTitle.TextSize = 14
+            leftTitle.TextXAlignment = Enum.TextXAlignment.Left
+            leftTitle.Parent = leftPanel
 
-            local scrollCorner = Instance.new("UICorner")
-            scrollCorner.CornerRadius = UDim.new(0, 10)
-            scrollCorner.Parent = sourceScroll
+            Instance.new("UICorner", leftTitle).CornerRadius = UDim.new(0, 10)
 
-            local layout = Instance.new("UIListLayout")
-            layout.SortOrder = Enum.SortOrder.LayoutOrder
-            layout.Padding = UDim.new(0, 6)
-            layout.Parent = sourceScroll
+            local leftScroll = Instance.new("ScrollingFrame")
+            leftScroll.Size = UDim2.new(1, -12, 1, -42)
+            leftScroll.Position = UDim2.new(0, 6, 0, 36)
+            leftScroll.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+            leftScroll.BorderSizePixel = 0
+            leftScroll.ScrollBarThickness = 6
+            leftScroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
+            leftScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+            leftScroll.Parent = leftPanel
+
+            local leftLayout = Instance.new("UIListLayout")
+            leftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            leftLayout.Padding = UDim.new(0, 4)
+            leftLayout.Parent = leftScroll
+
+            local rightPanel = Instance.new("Frame")
+            rightPanel.Size = UDim2.new(0.4, 0, 1, 0)
+            rightPanel.Position = UDim2.new(0.6, 8, 0, 0)
+            rightPanel.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+            rightPanel.BorderSizePixel = 0
+            rightPanel.Parent = preview
+
+            Instance.new("UICorner", rightPanel).CornerRadius = UDim.new(0, 10)
+
+            local rightTitle = Instance.new("TextLabel")
+            rightTitle.Size = UDim2.new(1, 0, 0, 30)
+            rightTitle.Position = UDim2.new(0, 0, 0, 0)
+            rightTitle.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+            rightTitle.BorderSizePixel = 0
+            rightTitle.Text = "SOURCE VIEWER"
+            rightTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+            rightTitle.Font = Enum.Font.GothamBold
+            rightTitle.TextSize = 14
+            rightTitle.TextXAlignment = Enum.TextXAlignment.Left
+            rightTitle.Parent = rightPanel
+
+            local rightInfo = Instance.new("TextLabel")
+            rightInfo.Size = UDim2.new(1, -16, 0, 100)
+            rightInfo.Position = UDim2.new(0, 8, 0, 36)
+            rightInfo.BackgroundTransparency = 1
+            rightInfo.Text = "This is the preview. Click a script on the left to open the full source view next to UraniumUltimate."
+            rightInfo.TextColor3 = Color3.fromRGB(190, 190, 210)
+            rightInfo.Font = Enum.Font.Gotham
+            rightInfo.TextSize = 12
+            rightInfo.TextWrapped = true
+            rightInfo.TextXAlignment = Enum.TextXAlignment.Left
+            rightInfo.TextYAlignment = Enum.TextYAlignment.Top
+            rightInfo.Parent = rightPanel
+
+            local openBtn = Instance.new("TextButton")
+            openBtn.Size = UDim2.new(0, 170, 0, 30)
+            openBtn.Position = UDim2.new(0, 8, 1, -38)
+            openBtn.BackgroundColor3 = Color3.fromRGB(72, 96, 255)
+            openBtn.BorderSizePixel = 0
+            openBtn.Text = "Open Full Source Viewer"
+            openBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            openBtn.Font = Enum.Font.GothamBold
+            openBtn.TextSize = 13
+            openBtn.Parent = rightPanel
+
+            local openCorner = Instance.new("UICorner")
+            openCorner.CornerRadius = UDim.new(0, 8)
+            openCorner.Parent = openBtn
 
             local scripts = collectDecodeProScripts()
+            local selectedScript = nil
+
             if #scripts == 0 then
                 local emptyLabel = Instance.new("TextLabel")
-                emptyLabel.Size = UDim2.new(1, -12, 0, 44)
-                emptyLabel.Position = UDim2.new(0, 6, 0, 0)
+                emptyLabel.Size = UDim2.new(1, -12, 0, 40)
+                emptyLabel.Position = UDim2.new(0, 6, 0, 6)
                 emptyLabel.BackgroundTransparency = 1
-                emptyLabel.Text = "No scripts found for Decode Pro. Ensure your game contains LocalScripts or ModuleScripts."
+                emptyLabel.Text = "No relevant scripts found."
                 emptyLabel.TextColor3 = Color3.fromRGB(190, 190, 210)
                 emptyLabel.Font = Enum.Font.Gotham
                 emptyLabel.TextSize = 12
                 emptyLabel.TextWrapped = true
                 emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
-                emptyLabel.Parent = sourceScroll
+                emptyLabel.Parent = leftScroll
             else
                 local folders = {}
                 for _, scr in ipairs(scripts) do
@@ -2191,29 +2235,24 @@ populateTools()]]
                 end
                 table.sort(folderNames)
 
-                local activeScriptButton = nil
                 for folderIndex, folderName in ipairs(folderNames) do
                     local folderScripts = folders[folderName]
                     local folderBtn = Instance.new("TextButton")
-                    folderBtn.Size = UDim2.new(1, 0, 0, 30)
+                    folderBtn.Size = UDim2.new(1, 0, 0, 28)
                     folderBtn.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
                     folderBtn.BorderSizePixel = 0
                     folderBtn.Text = "[+] " .. folderName .. " (" .. #folderScripts .. ")"
                     folderBtn.TextColor3 = Color3.fromRGB(210, 210, 255)
-                    folderBtn.TextSize = 13
+                    folderBtn.TextSize = 12
                     folderBtn.Font = Enum.Font.GothamBold
                     folderBtn.TextXAlignment = Enum.TextXAlignment.Left
                     folderBtn.LayoutOrder = folderIndex * 100
-                    folderBtn.Parent = sourceScroll
+                    folderBtn.Parent = leftScroll
 
-                    local folderCorner = Instance.new("UICorner")
-                    folderCorner.CornerRadius = UDim.new(0, 8)
-                    folderCorner.Parent = folderBtn
-
-                    local folderStroke = Instance.new("UIStroke")
+                    Instance.new("UICorner", folderBtn).CornerRadius = UDim.new(0, 6)
+                    local folderStroke = Instance.new("UIStroke", folderBtn)
                     folderStroke.Color = Color3.fromRGB(60, 60, 70)
                     folderStroke.Thickness = 1
-                    folderStroke.Parent = folderBtn
 
                     local expanded = false
                     local folderContainer = nil
@@ -2228,22 +2267,25 @@ populateTools()]]
                             folderContainer.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
                             folderContainer.BorderSizePixel = 0
                             folderContainer.LayoutOrder = folderBtn.LayoutOrder + 1
-                            folderContainer.Parent = sourceScroll
+                            folderContainer.Parent = leftScroll
 
-                            local folderLayout = Instance.new("UIListLayout")
+                            local folderLayout = Instance.new("UIListLayout", folderContainer)
                             folderLayout.SortOrder = Enum.SortOrder.LayoutOrder
                             folderLayout.Padding = UDim.new(0, 4)
-                            folderLayout.Parent = folderContainer
 
-                            local folderPadding = Instance.new("UIPadding")
+                            local folderPadding = Instance.new("UIPadding", folderContainer)
                             folderPadding.PaddingLeft = UDim.new(0, 12)
-                            folderPadding.PaddingTop = UDim.new(0, 6)
-                            folderPadding.PaddingBottom = UDim.new(0, 6)
-                            folderPadding.Parent = folderContainer
+                            folderPadding.PaddingTop = UDim.new(0, 4)
+                            folderPadding.PaddingBottom = UDim.new(0, 4)
+
+                            Instance.new("UICorner", folderContainer).CornerRadius = UDim.new(0, 6)
+                            local folderStroke2 = Instance.new("UIStroke", folderContainer)
+                            folderStroke2.Color = Color3.fromRGB(50, 50, 50)
+                            folderStroke2.Thickness = 1
 
                             for i, scr in ipairs(folderScripts) do
                                 local scriptBtn = Instance.new("TextButton")
-                                scriptBtn.Size = UDim2.new(1, -14, 0, 28)
+                                scriptBtn.Size = UDim2.new(1, -12, 0, 24)
                                 scriptBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
                                 scriptBtn.BorderSizePixel = 0
                                 scriptBtn.Text = scr.Name
@@ -2254,14 +2296,10 @@ populateTools()]]
                                 scriptBtn.LayoutOrder = i
                                 scriptBtn.Parent = folderContainer
 
-                                local scriptCorner = Instance.new("UICorner")
-                                scriptCorner.CornerRadius = UDim.new(0, 6)
-                                scriptCorner.Parent = scriptBtn
-
-                                local scriptStroke = Instance.new("UIStroke")
+                                Instance.new("UICorner", scriptBtn).CornerRadius = UDim.new(0, 6)
+                                local scriptStroke = Instance.new("UIStroke", scriptBtn)
                                 scriptStroke.Color = Color3.fromRGB(50, 50, 60)
                                 scriptStroke.Thickness = 1
-                                scriptStroke.Parent = scriptBtn
 
                                 scriptBtn.MouseEnter:Connect(function()
                                     if scriptBtn ~= activeScriptButton then
@@ -2280,6 +2318,7 @@ populateTools()]]
                                     end
                                     activeScriptButton = scriptBtn
                                     scriptBtn.BackgroundColor3 = Color3.fromRGB(65, 95, 220)
+                                    selectedScript = scr
                                     ShowSourceViewer(scr)
                                 end)
                             end
@@ -2297,15 +2336,18 @@ populateTools()]]
                     end)
                 end
             end
+            leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                leftScroll.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 10)
+            end)
 
-            local function updateScrollCanvas()
-                sourceScroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-            end
-            layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateScrollCanvas)
-            updateScrollCanvas()
+            openBtn.MouseButton1Click:Connect(function()
+                if selectedScript then
+                    ShowSourceViewer(selectedScript)
+                end
+            end)
         end
 
-        renderDecodeProExplorer(messageContent)
+        renderDecodeProPreview(messageContent)
 
         table.insert(conversationHistory, {role = "assistant", content = "Decode Pro Explorer opened."})
         task.wait()
